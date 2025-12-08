@@ -1,6 +1,19 @@
-# Xtreme ADB V1
+Got it. Here is the final `README.md`, now personalized with your name and repository link.
 
-![Python](https://img.shields.io/badge/Python-3.10%2B-blue) ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey) ![License](https://img.shields.io/badge/License-Attribution%20Required-orange)
+---
+
+<p align="center">
+  <img src="xadb.ico" alt="Xtreme ADB Icon" width="128">
+</p>
+
+<h1 align="center">Xtreme ADB V1</h1>
+
+<p align="center">
+  <a href="https://github.com/KPR-MAN/XtremeADB"><img src="https://img.shields.io/badge/Repo-GitHub-blueviolet" alt="Repo"></a>
+  <img src="https://img.shields.io/badge/Python-3.10%2B-blue.svg" alt="Python Version">
+  <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey" alt="Platform">
+  <img src="https://img.shields.io/badge/License-Attribution%20Required-orange" alt="License">
+</p>
 
 **The Ultimate All-in-One Android Toolkit.**
 Xtreme ADB is a powerful, multi-threaded GUI for managing Android devices. It combines advanced features like Fastboot flashing, Wireless Pairing, and App Management into a sleek, modern interface.
@@ -38,6 +51,17 @@ for messing up your device, I will laugh at you.
 *   **Tweaks:** Change DPI, Resolution, Animation Scales, and toggle visual pointers.
 *   **Backup & Restore:** Create full system backups (`.ab` files) and restore them.
 *   **Logcat:** Color-coded real-time log stream to easily spot errors.
+
+---
+
+## Screenshots
+
+<p align="center">
+  <img src="screenshots/ss1.png" alt="Dashboard View" width="75%">
+</p>
+<p align="center">
+  <img src="screenshots/ss2.png" alt="App Manager View" width="75%">
+</p>
 
 ---
 
@@ -81,8 +105,8 @@ You are free to:
 *   Distribute or Fork this project.
 
 **Under the following condition:**
-*   **Attribution Required:** You **MUST** give appropriate credit to the original author in your software, documentation, or repository (e.g., "Based on Xtreme ADB by KPR-MAN").
+*   **Attribution Required:** You **MUST** give appropriate credit to the original author in your software, documentation, or repository. For example: `Based on Xtreme ADB by KPR-MAN (https://github.com/KPR-MAN/XtremeADB)`.
 
 ---
 
-**Developed with ❤️ and Python.**
+**Made With ❤️ By [KPR-MAN](https://github.com/KPR-MAN/XtremeADB).**
