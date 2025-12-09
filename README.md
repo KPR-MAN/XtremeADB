@@ -1,7 +1,3 @@
-Got it. Here is the final `README.md`, now personalized with your name and repository link.
-
----
-
 <p align="center">
   <img src="xadb.ico" alt="Xtreme ADB Icon" width="128">
 </p>
