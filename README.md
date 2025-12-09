@@ -2,7 +2,7 @@
   <img src="xadb.ico" alt="Xtreme ADB Icon" width="128">
 </p>
 
-<h1 align="center">Xtreme ADB V1</h1>
+<h1 align="center">Xtreme ADB</h1>
 
 <p align="center">
   <a href="https://github.com/KPR-MAN/XtremeADB"><img src="https://img.shields.io/badge/Repo-GitHub-blueviolet" alt="Repo"></a>
