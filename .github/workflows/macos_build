@@ -1,0 +1,36 @@
+name: Build XtremeADB macOS
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller --clean -D --splash splash.png --icon xadb.png -w xadb.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: XtremeADB-macos
+          path: dist/
