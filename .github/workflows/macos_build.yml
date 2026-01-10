@@ -27,7 +27,7 @@ jobs:
 
       - name: Build with PyInstaller
         run: |
-          pyinstaller --clean -D --splash splash.png --icon xadb.png -w xadb.py
+          pyinstaller --clean -D --icon xadb.png -w xadb.py
 
       - name: Package dist folder as ZIP
         run: |
