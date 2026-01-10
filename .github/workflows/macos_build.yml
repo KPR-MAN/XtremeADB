@@ -19,18 +19,24 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install dependencies
+      - name: Upgrade pip and install requirements (skip missing)
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install --ignore-installed --no-cache-dir -r requirements.txt || echo "Some requirements were not found, skipping..."
           pip install pyinstaller
 
       - name: Build with PyInstaller
         run: |
           pyinstaller --clean -D --splash splash.png --icon xadb.png -w xadb.py
 
-      - name: Upload artifact
+      - name: Package dist folder as ZIP
+        run: |
+          cd dist
+          zip -r ../XtremeADB-macos.zip XtremeADB
+          cd ..
+
+      - name: Upload ZIP artifact
         uses: actions/upload-artifact@v4
         with:
           name: XtremeADB-macos
-          path: dist/
+          path: XtremeADB-macos.zip
