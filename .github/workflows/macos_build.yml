@@ -24,6 +24,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install --ignore-installed --no-cache-dir -r requirements.txt || echo "Some requirements were not found, skipping..."
           pip install pyinstaller
+          pip install pillow
 
       - name: Build with PyInstaller
         run: |
