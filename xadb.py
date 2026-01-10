@@ -9,6 +9,13 @@ import json
 import datetime
 from tkinter import filedialog, messagebox, Canvas
 from pathlib import Path
+import sys
+
+if getattr(sys, "frozen", False):
+    import pyi_splash
+else:
+    pyi_splash = None
+
 
 # ==========================================
 # 1. CORE CONFIGURATION
@@ -93,6 +100,7 @@ class FluentButton(ctk.CTkButton):
         super().__init__(master, **kwargs)
         self.default_color = kwargs.get("fg_color", "transparent")
         self.default_text_color = kwargs.get("text_color", C["text_sub"])
+        
 
     def set_active(self, is_active):
         if is_active:
@@ -275,14 +283,33 @@ class XtremeADB(ctk.CTk):
         self.active_radials = []
         self.monitor_active = False
         self.file_buttons = []
-        self.consoles = {} # Store consoles per view
+        self.consoles = {}  # Store consoles per view
 
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
         self.init_ui()
+
+        # -------------------------------
+        # Set window icon cross-platform
+        # -------------------------------
+        try:
+            if os.name == "nt":
+                self.iconbitmap("xadb.ico")  # Windows
+            else:
+                img = ctk.CTkImage(light_image=None, dark_image=None, size=(32, 32))
+                img = ctk.CTkImage(light_image=Image.open("xadb.png"), dark_image=Image.open("xadb.png"), size=(32,32))
+                self.iconphoto(True, img._photo)  # Linux / macOS / WSL
+        except Exception as e:
+            print(f"Could not set icon: {e}")
+
         threading.Thread(target=self.dev_loop, daemon=True).start()
         threading.Thread(target=self.stats_loop, daemon=True).start()
+
+        # Close PyInstaller splash when main window is ready
+        if pyi_splash:
+            self.after(500, pyi_splash.close)
+
 
     def run_bg(self, func):
         threading.Thread(target=func, daemon=True).start()
@@ -925,4 +952,3 @@ class XtremeADB(ctk.CTk):
 if __name__ == "__main__":
     app = XtremeADB()
     app.mainloop()
-
