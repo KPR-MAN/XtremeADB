@@ -33,7 +33,7 @@ jobs:
       - name: Package dist folder as ZIP
         run: |
           cd dist
-          zip -r ../XtremeADB-macos.zip XtremeADB
+          zip -r ../XtremeADB-macos.zip xadb
           cd ..
 
       - name: Upload ZIP artifact
