@@ -13,7 +13,7 @@ from pathlib import Path
 # ==========================================
 # 1. CORE CONFIGURATION
 # ==========================================
-APP_NAME = "Xtreme ADB V2.0 (Expanded)"
+APP_NAME = "Xtreme ADB V1.1"
 CONFIG_FILE = "xtreme_config.json"
 LOG_FILE = "xtreme_log.txt"
 
@@ -925,3 +925,4 @@ class XtremeADB(ctk.CTk):
 if __name__ == "__main__":
     app = XtremeADB()
     app.mainloop()
+
