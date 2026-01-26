@@ -12,21 +12,11 @@
 </p>
 
 **The Ultimate All-in-One Android Toolkit.**
-Xtreme ADB is a powerful, multi-threaded GUI for managing Android devices. It combines advanced features like Fastboot flashing, Wireless Pairing, and App Management into a sleek, modern interface.
+Xtreme ADB is An App That Helps You To Use Android debuging bridge easier By Using Graphical Interface.
 
 ---
 
 ## DISCLAIMER & WARNINGS
-
-**PLEASE READ THIS CAREFULLY BEFORE USING THIS TOOL.**
-
-```text
-I am not responsible for bricked devices, dead SD cards, thermonuclear war, 
-or you getting fired because the alarm app failed. 
-
-YOU are choosing to make these modifications, and if you point the finger at me 
-for messing up your device, I will laugh at you.
-```
 
 ### Critical Warnings:
 1.  **Fastboot Mode:** The "Fastboot Tools" section allows you to flash images (`recovery.img`, `boot.img`) and unlock your bootloader. **Improper use of these features CAN brick your device.** Do not use these buttons unless you understand exactly what you are doing.
@@ -38,7 +28,7 @@ for messing up your device, I will laugh at you.
 
 ## Features
 
-*   **Modern UI:** A clean "Material Glass" design with full Light/Dark mode support.
+*   **Modern UI:** A clean design with full Light/Dark mode support.
 *   **Live Dashboard:** Real-time monitoring of Battery and RAM.
 *   **App Manager:** Bulk install APKs, uninstall system apps, force stop, and extract APKs to PC.
 *   **File Explorer:** Full GUI file manager to Copy, Paste, Rename, Delete, Upload, and Download files.
@@ -46,17 +36,17 @@ for messing up your device, I will laugh at you.
 *   **Wireless ADB:** Built-in pairing tool for Android 11+ (Pairing Code support) and TCP/IP toggler.
 *   **Tweaks:** Change DPI, Resolution, Animation Scales, and toggle visual pointers.
 *   **Backup & Restore:** Create full system backups (`.ab` files) and restore them.
-*   **Logcat:** Color-coded real-time log stream to easily spot errors.
+*   **Logcat:** Color-coded (*In Dark Mode only) real-time log stream to easily spot errors.
 
 ---
 
 ## Screenshots
 
 <p align="center">
-  <img src="screenshots/ss1.png" alt="Dashboard View" width="75%">
+  <img src="screenshots/ss1.png" alt="Dashboard View 1" width="75%">
 </p>
 <p align="center">
-  <img src="screenshots/ss2.png" alt="App Manager View" width="75%">
+  <img src="screenshots/ss2.png" alt="Dashboard View 2" width="75%">
 </p>
 
 ---
@@ -65,18 +55,15 @@ for messing up your device, I will laugh at you.
 
 ### Prerequisites
 1.  **Python 3.10+**: [Download Here](https://www.python.org/)
-2.  **ADB & Fastboot**: Must be installed and added to your system `PATH`. [Google Platform Tools](https://developer.android.com/studio/releases/platform-tools)
+2.  **Libraries**: Can Be Installed with the command `pip install -r requirments.txt`
+3.  **ADB & Fastboot**: Must be installed and added to your system `PATH`. [Google Platform Tools](https://developer.android.com/studio/releases/platform-tools)
 
 ### Setup
+**You can download latest release executable instead of the python script Or:**
 1.  Open your terminal/command prompt.
-2.  Install the required UI library:
-    ```bash
-    pip install customtkinter
-    ```
-3.  Run the tool:
-    ```bash
-    python xadb.py
-    ```
+2.  Clone this repo: `git clone https://github.com/KPR-MAN/XtremeADB`
+3.  Install the required libraries: `pip install -r requirments.txt`
+4.  Run the tool: `python xadb.py`
 
 ---
 
