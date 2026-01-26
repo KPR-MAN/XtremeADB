@@ -7,7 +7,7 @@ import re
 import json
 import datetime
 from tkinter import filedialog, messagebox, Canvas
-from PIL import Image
+from PIL import Image, ImageTk
 import sys
 
 if getattr(sys, "frozen", False):
@@ -301,8 +301,10 @@ class XtremeADB(ctk.CTk):
 
         self.init_ui()
         
-        # Maximize window (not fullscreen)
-        self.after(0, lambda: self.state('zoomed'))
+        if os.name == "nt":
+            self.after(0, lambda: self.state('zoomed'))  # Windows
+        else:
+            self.after(0, lambda: self.state('normal'))  # Linux / macOS / WSL (Setting as Normal Because There is no Full Screen)
 
         # -------------------------------
         # Set window icon cross-platform
@@ -311,9 +313,10 @@ class XtremeADB(ctk.CTk):
             if os.name == "nt":
                 self.iconbitmap("xadb.ico")  # Windows
             else:
-                img = ctk.CTkImage(light_image=None, dark_image=None, size=(32, 32))
-                img = ctk.CTkImage(light_image=Image.open("xadb.png"), dark_image=Image.open("xadb.png"), size=(32,32))
-                self.iconphoto(True, img._photo)  # Linux / macOS / WSL
+                icon_image = Image.open("xadb.png")
+                icon_photo = ImageTk.PhotoImage(icon_image)
+                self.iconphoto(True, icon_photo)  # Linux / macOS / WSL
+                self._icon_ref = icon_photo
         except Exception as e:
             print(f"Could not set icon: {e}")
 
