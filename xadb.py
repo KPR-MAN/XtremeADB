@@ -7,6 +7,7 @@ import re
 import json
 import datetime
 from tkinter import filedialog, messagebox, Canvas
+from PIL import Image
 import sys
 
 if getattr(sys, "frozen", False):
@@ -480,8 +481,11 @@ class XtremeADB(ctk.CTk):
         pg.pack(fill="x")
         btns = [("Reboot System", ["reboot"], C["primary"]), ("Recovery", ["reboot", "recovery"], C["warning"]),
                 ("Bootloader", ["reboot", "bootloader"], C["warning"]), ("Power Off", ["reboot", "-p"], C["danger"])]
+
+        button_text_color = "#000000" if ctk.get_appearance_mode() == "Light" else "#FFFFFF" ## Fix For Issue 1
+
         for label, cmd, color in btns:
-            ctk.CTkButton(pg, text=label, fg_color=color, height=50, corner_radius=8, font=("Segoe UI", 14, "bold"),
+            ctk.CTkButton(pg, text=label, text_color=button_text_color, fg_color=color, height=50, corner_radius=8, font=("Segoe UI", 14, "bold"),
                           command=lambda x=cmd: self.adb_cmd_console(x)).pack(side="left", fill="x", expand=True, padx=5)
 
         # Console
