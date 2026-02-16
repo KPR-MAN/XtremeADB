@@ -6,9 +6,14 @@ import time
 import re
 import json
 import datetime
+import sys
+import requests
+import json
+from packaging import version
 from tkinter import filedialog, messagebox, Canvas
 from PIL import Image, ImageTk
-import sys
+from pathlib import Path
+from CTkMessagebox import CTkMessagebox
 
 if getattr(sys, "frozen", False):
     import pyi_splash
@@ -19,9 +24,10 @@ else:
 # ==========================================
 # 1. CORE CONFIGURATION
 # ==========================================
-APP_NAME = "Xtreme ADB V1.2"
-CONFIG_FILE = "xtreme_config.json"
+APP_NAME = "Xtreme ADB V1.3"
 LOG_FILE = "xtreme_log.txt"
+CURRENT_VERSION = "1.3"
+UPDATE_URL = "https://raw.githubusercontent.com/KPR-MAN/XtremeADB/main/version.json"
 
 DEFAULT_CONFIG = {
     "theme": "Dark",
@@ -32,6 +38,12 @@ DEFAULT_CONFIG = {
     "scrcpy_args": "--max-size 1024 --video-bit-rate 8M",
     "use_su": False
 }
+
+if os.name == 'nt':
+    CONFIG_FILE = Path(os.getenv('APPDATA')) / "XtremeADB" / "xtreme_config.json"
+    CONFIG_FILE.parent.mkdir(exist_ok=True)
+else:
+    CONFIG_FILE = Path("xtreme_config.json")
 
 def load_config():
     if not os.path.exists(CONFIG_FILE):
@@ -67,6 +79,21 @@ def log_action(message):
 CONF = load_config()
 ctk.set_appearance_mode(CONF["theme"])
 ctk.set_default_color_theme("dark-blue")
+
+# --- UPDATE CHECKER FUNCTION ---
+def check_for_updates():
+    try:
+        response = requests.get(UPDATE_URL, timeout=5)
+        data = response.json()
+        latest_version = data["version"]
+        download_url = data["download_url"]
+        
+        if version.parse(latest_version) > version.parse(CURRENT_VERSION):
+            return True, latest_version, download_url
+        return False, None, None
+    except:
+        return False, None, None
+
 
 # ==========================================
 # 2. CONSTANTS & PALETTE
@@ -326,7 +353,32 @@ class XtremeADB(ctk.CTk):
         # Close PyInstaller splash when main window is ready
         if pyi_splash:
             self.after(500, pyi_splash.close)
-
+           
+        # Check for Updates
+        if CONF["check_updates"]:
+            has_update, new_ver, url = check_for_updates()
+            if has_update:
+                msg = CTkMessagebox(
+                    title="Update Available",
+                    message=f"A update is available (v{new_ver}) !\n\nWould you like to download it?",
+                    icon="info",
+                    option_1="Download",
+                    option_2="Remind me later",
+                    option_3="Never remind"
+                )
+        
+                # Manually color the buttons after creation
+                msg.button_1.configure(fg_color="green", hover_color="darkgreen")
+                msg.button_2.configure(fg_color="orange", hover_color="darkorange")
+                msg.button_3.configure(fg_color="red", hover_color="darkred")
+        
+                response = msg.get()
+                if response == "Download":
+                    import webbrowser
+                    webbrowser.open(url)
+                elif response == "Never remind":
+                    save_config("check_updates", False)
+    
 
     def run_bg(self, func):
         threading.Thread(target=func, daemon=True).start()
@@ -677,8 +729,13 @@ class XtremeADB(ctk.CTk):
         self.lbl_pkg.configure(text=p)
 
     def install_apk(self):
-        f = filedialog.askopenfilename(filetypes=[("APK", "*.apk")])
-        if f: self.adb_cmd_console(["install", f], "Install Started")
+        files = filedialog.askopenfilenames(filetypes=[("APK", "*.apk")])  # Note: askopenfileNAMES (plural)
+        if files:
+            self.app_console.log(f"Installing {len(files)} APK(s)...")
+            for i, f in enumerate(files, 1):
+                self.app_console.log(f"[{i}/{len(files)}] Installing {os.path.basename(f)}...")
+                self.adb_cmd_console(["install", f], f"Installing {os.path.basename(f)}")
+            self.app_console.log("All installations queued!")
 
     def do_uninst(self):
         if self.sel_pkg: 
@@ -721,13 +778,19 @@ class XtremeADB(ctk.CTk):
         
         bar = ctk.CTkFrame(self.main, fg_color="transparent")
         bar.pack(fill="x", pady=10)
-        ops = [("New Folder", self.fm_mkdir), ("Delete", self.fm_del), ("Rename", self.fm_ren), ("Upload", self.fm_upload), ("Download", self.fm_download)]
+        ops = [("New Folder", self.fm_mkdir), ("Delete", self.fm_del), ("Rename", self.fm_ren), ("Upload", self.fm_upload), ("Download", self.fm_download_single)]
         for label, cmd in ops:
             ctk.CTkButton(bar, text=label, width=80, fg_color=C["input_bg"], hover_color=C["bg_hover"], text_color=C["text_main"], command=cmd).pack(side="left", padx=5)
         
         self.fm_list = ctk.CTkScrollableFrame(self.main, fg_color=C["bg_surface"], corner_radius=15)
         self.fm_list.pack(fill="both", expand=True)
         self.fm_sel = None
+        self.fm_selected = []  # Track multiple selections
+        self.ctrl_pressed = False  # Track Ctrl key
+        self.bind_all("<Control_L>", lambda e: setattr(self, 'ctrl_pressed', True))
+        self.bind_all("<KeyRelease-Control_L>", lambda e: setattr(self, 'ctrl_pressed', False))
+        self.bind_all("<Control_R>", lambda e: setattr(self, 'ctrl_pressed', True))
+        self.bind_all("<KeyRelease-Control_R>", lambda e: setattr(self, 'ctrl_pressed', False))
         self.fm_ent.insert(0, self.cur_path)
         
         self.fm_console = LogConsole(self.main, height=120)
@@ -744,12 +807,34 @@ class XtremeADB(ctk.CTk):
         self.fm_console.log(f"Listing {path}...")
 
         def _t():
-            out = self.bk.run([ADB_PATH, "-s", cln, "shell", "ls", "-1pH", f'"{path}"'])
-            if "[ERROR]" in out:
+            out = self.bk.run([ADB_PATH, "-s", cln, "shell", f"ls {path}"])
+            if "[ERROR]" in out or "No such file" in out:
                 self.after(0, lambda: self.fm_console.log("Error reading directory."))
                 return
-            items = [x for x in out.split("\n") if x.strip()]
-            self.after(0, lambda: self._populate_file_list(items))
+            items = [x.strip() for x in out.split("\n") if x.strip()]
+            
+            if not items:
+                self.after(0, lambda: self.fm_console.log("Directory is empty."))
+                return
+            
+            items_with_type = []
+            folder_count = 0
+            file_count = 0
+            
+            for item in items:
+                test_cmd = f"[ -d '{path.rstrip('/')}/{item}' ] && echo DIR || echo FILE"
+                result = self.bk.run([ADB_PATH, "-s", cln, "shell", test_cmd]).strip()
+                is_dir = "DIR" in result
+                display_name = f"{item}/" if is_dir else item
+                items_with_type.append(display_name)
+                
+                if is_dir:
+                    folder_count += 1
+                else:
+                    file_count += 1
+            
+            self.after(0, lambda: self._populate_file_list(items_with_type))
+            self.after(0, lambda: self.fm_console.log(f"Listed: {file_count} file(s), {folder_count} folder(s)"))
 
         self.run_bg(_t)
 
@@ -758,6 +843,7 @@ class XtremeADB(ctk.CTk):
             is_dir = item.endswith("/")
             col = C["primary"] if is_dir else C["text_main"]
             icon = "📁" if is_dir else "📄"
+            
             btn = ctk.CTkButton(
                 self.fm_list,
                 text=f"{icon}  {item}",
@@ -765,17 +851,62 @@ class XtremeADB(ctk.CTk):
                 fg_color="transparent",
                 hover_color=C["bg_hover"],
                 text_color=col,
-                command=lambda n=item: self.fm_select_item(n)
+                command=lambda n=item: self.fm_click_item(n)
             )
             btn.pack(fill="x")
+            
             if is_dir:
                 btn.bind("<Double-Button-1>", lambda e, x=item: self.fm_ent_dir(x))
-            self.file_buttons.append(btn)
-
-    def fm_select_item(self, name):
+            
+            btn.bind("<Button-3>", lambda e, name=item: self.show_file_context_menu(e, name))
+            
+            self.file_buttons.append((btn, item))
+            
+    def fm_click_item(self, name):
+        if self.ctrl_pressed:
+            # Ctrl+Click = Toggle selection
+            if name in self.fm_selected:
+                self.fm_selected.remove(name)
+            else:
+                self.fm_selected.append(name)
+        else:
+            # Normal click = Single selection
+            self.fm_selected = [name]
+        
         self.fm_sel = name
-        for btn in self.file_buttons: btn.configure(fg_color="transparent")
-
+        
+        # Update highlights
+        for btn, item_name in self.file_buttons:
+            if item_name in self.fm_selected:
+                btn.configure(fg_color=C["bg_hover"])
+            else:
+                btn.configure(fg_color="transparent")
+        
+        if len(self.fm_selected) > 0:
+            self.fm_console.log(f"{len(self.fm_selected)} item(s) selected")
+                
+    def show_file_context_menu(self, event, name):
+        import tkinter as tk
+        
+        menu = tk.Menu(self, tearoff=0)
+        
+        if len(self.fm_selected) > 1:
+            # Multi-select menu
+            menu.add_command(label=f"Delete {len(self.fm_selected)} items", command=self.fm_del_multiple)
+            menu.add_command(label=f"Download (Receive){len(self.fm_selected)} items", command=self.fm_download_multiple)
+        else:
+            # Single item menu - works for BOTH files AND folders now
+            menu.add_command(label="Download (Receive)", command=lambda: self.fm_download_single(name))
+            
+            if name.endswith("/"):
+                menu.add_separator()
+                menu.add_command(label="Upload (Send)", command=lambda: self.fm_upload_to(name))
+            
+            menu.add_separator()
+            menu.add_command(label="Delete", command=lambda: self.fm_del_single(name))
+        
+        menu.post(event.x_root, event.y_root)
+        
     def fm_ent_dir(self, x):
         self.cur_path = (self.cur_path.rstrip("/") + "/" + x).replace("\\", "/")
         self.fm_ent.delete(0, "end")
@@ -801,6 +932,19 @@ class XtremeADB(ctk.CTk):
         if self.fm_sel and messagebox.askyesno("Confirm", f"Delete {self.fm_sel}?"):
             self.adb_cmd_console(["shell", "rm", "-rf", f'"{self.cur_path.rstrip("/")}/{self.fm_sel}"'])
             self.after(500, self.fm_load)
+            
+    def fm_del_multiple(self):
+        if not self.fm_selected:
+            return
+        if messagebox.askyesno("Confirm", f"Delete {len(self.fm_selected)} items?"):
+            if not self.sel_dev: return
+            cln = self.sel_dev.split()[0]
+            for name in self.fm_selected:
+                path = f"{self.cur_path.rstrip('/')}/{name.rstrip('/')}"
+                self.fm_console.log(f"Deleting {name}...")
+                self.bk.run([ADB_PATH, "-s", cln, "shell", "rm", "-rf", f'"{path}"'])
+            self.fm_selected = []
+            self.after(500, self.fm_load)
 
     def fm_ren(self):
         if not self.fm_sel: return
@@ -818,12 +962,28 @@ class XtremeADB(ctk.CTk):
             for f in files: self.adb_cmd_console(["push", f, self.cur_path.rstrip("/") + "/"])
             self.after(1000, self.fm_load)
 
-    def fm_download(self):
-        if not self.fm_sel: return
-        save_path = filedialog.asksaveasfilename(initialfile=self.fm_sel)
-        if save_path:
-            remote = self.cur_path.rstrip("/") + "/" + self.fm_sel
-            self.adb_cmd_console(["pull", remote, save_path])
+    def fm_download_single(self, name):
+        if not self.sel_dev: return
+        cln = self.sel_dev.split()[0]
+        d = filedialog.askdirectory(title="Save to")
+        if d:
+            src = f"{self.cur_path.rstrip('/')}/{name.rstrip('/')}"
+            self.fm_console.log(f"Downloading {name}...")
+            # Use pull with recursive flag for folders
+            self.bk.run_live([ADB_PATH, "-s", cln, "pull", src, d], lambda l: self.fm_console.log(l))
+            
+    def fm_download_multiple(self):
+        if not self.fm_selected:
+            return
+        if not self.sel_dev: return
+        cln = self.sel_dev.split()[0]
+        d = filedialog.askdirectory(title="Save to")
+        if d:
+            for name in self.fm_selected:
+                src = f"{self.cur_path.rstrip('/')}/{name.rstrip('/')}"
+                self.fm_console.log(f"Downloading {name}...")
+                self.bk.run_live([ADB_PATH, "-s", cln, "pull", src, d], lambda l: self.fm_console.log(l))
+            self.fm_selected = []
 
     # --- SHELL ---
     def view_shell(self):
@@ -837,11 +997,11 @@ class XtremeADB(ctk.CTk):
 
         header = ctk.CTkFrame(terminal_container, height=35, fg_color="transparent")
         header.pack(fill="x", padx=10, pady=(10, 5))
-        ctk.CTkLabel(header, text="> ADB Shell", font=("Consolas", 12, "bold"), text_color=C["text_sub"]).pack(
-            side="left")
+        ctk.CTkLabel(header, text="> ADB Shell", font=("Consolas", 12, "bold"), text_color=C["text_sub"]).pack(side="left")
         ctk.CTkButton(header, text="Clear", width=60, height=25, fg_color=C["input_bg"], text_color=C["text_main"],
                       font=("Segoe UI", 10), command=self.clear_terminal).pack(side="right", padx=5)
 
+        # Output box (read-only)
         self.shell_output = ctk.CTkTextbox(
             terminal_container,
             font=("Consolas", 12),
@@ -849,137 +1009,128 @@ class XtremeADB(ctk.CTk):
             text_color=C["term_fg"],
             activate_scrollbars=True
         )
-        self.shell_output.pack(fill="both", expand=True, padx=10, pady=(0, 10))
-        self.shell_output.bind("<Key>", self.handle_terminal_input)
-        self.shell_output.bind("<Return>", self.execute_terminal_command)
-        self.shell_output.bind("<BackSpace>", self.handle_backspace)
-        self.shell_output.bind("<Control-c>", self.handle_ctrl_c)
-        self.shell_output.focus()
+        self.shell_output.pack(fill="both", expand=True, padx=10, pady=(0, 5))
+        self.shell_output.configure(state="disabled")
 
-        self.shell_prompt = "$ "
-        self.command_buffer = ""
-        self.shell_running = False
+        # Input box
+        input_frame = ctk.CTkFrame(terminal_container, fg_color="transparent")
+        input_frame.pack(fill="x", padx=10, pady=(0, 10))
+        
+        ctk.CTkLabel(input_frame, text="$", font=("Consolas", 14, "bold"), text_color=C["success"]).pack(side="left", padx=(5, 5))
+        
+        self.shell_input = ctk.CTkEntry(
+            input_frame,
+            font=("Consolas", 12),
+            fg_color=C["input_bg"],
+            border_width=0,
+            text_color=C["text_main"]
+        )
+        self.shell_input.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        self.shell_input.bind("<Return>", self.execute_shell_command)
+        self.shell_input.focus()
 
+        ctk.CTkButton(
+            input_frame, 
+            text="Run", 
+            width=60, 
+            fg_color=C["primary"],
+            command=lambda: self.execute_shell_command(None)
+        ).pack(side="right")
+
+        # Start persistent shell
+        self.shell_proc = None
         if self.sel_dev:
-            self.run_bg(self.get_shell_prompt)
+            self.run_bg(self.start_shell_session)
+
+    def start_shell_session(self):
+        """Start background shell process"""
+        if not self.sel_dev:
+            return
+        
+        clean = self.sel_dev.split()[0]
+        
+        try:
+            # Start interactive shell with unbuffered output
+            self.shell_proc = subprocess.Popen(
+                [ADB_PATH, "-s", clean, "shell"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=0
+            )
+            
+            self.after(0, lambda: self.append_shell_output("Shell connected. Type commands below.\n"))
+        except Exception as e:
+            self.after(0, lambda: self.append_shell_output(f"Error: {e}\n"))
 
     def clear_terminal(self):
+        self.shell_output.configure(state="normal")
         self.shell_output.delete("1.0", "end")
-        self.shell_output.insert("end", self.shell_prompt)
-        self.prompt_index = self.shell_output.index("end-1c linestart")
-        self.command_buffer = ""
+        self.shell_output.configure(state="disabled")
 
-    def get_shell_prompt(self):
-        if not self.sel_dev: return
-        clean = self.sel_dev.split()[0]
-
-        whoami = self.bk.run([ADB_PATH, "-s", clean, "shell", "whoami"]).strip()
-        hostname = self.bk.run([ADB_PATH, "-s", clean, "shell", "getprop", "ro.product.device"]).strip()
-
-        if whoami == "root":
-            self.shell_prompt = f"{hostname}:/ # "
-        else:
-            self.shell_prompt = f"{hostname}:/ $ "
-
-        self.shell_output.insert("end", f"Connected to {hostname}\n")
-        self.shell_output.insert("end", self.shell_prompt)
+    def append_shell_output(self, text):
+        self.shell_output.configure(state="normal")
+        self.shell_output.insert("end", text)
         self.shell_output.see("end")
-        self.prompt_index = self.shell_output.index("end-1c linestart")
+        self.shell_output.configure(state="disabled")
 
-    def handle_terminal_input(self, event):
-        if event.keysym in ["Return", "BackSpace", "Left", "Right", "Up", "Down"]:
-            return
-
-        if event.state & 0x4:
-            return
-
-        current_pos = self.shell_output.index("insert")
-        if self.shell_output.compare(current_pos, "<", self.prompt_index):
-            return "break"
-
-        if len(event.char) == 1 and event.char.isprintable():
-            self.command_buffer += event.char
-
-    def handle_backspace(self, event):
-        current_pos = self.shell_output.index("insert")
-        if self.shell_output.compare(current_pos, "<=", self.prompt_index):
-            return "break"
-
-        if self.command_buffer:
-            self.command_buffer = self.command_buffer[:-1]
-
-    def handle_ctrl_c(self, event):
-        if self.shell_running:
-            self.shell_running = False
-            self.shell_output.insert("end", "\n^C\n")
-            self.shell_output.insert("end", self.shell_prompt)
-            self.prompt_index = self.shell_output.index("end-1c linestart")
-            self.shell_output.see("end")
-        else:
-            self.command_buffer = ""
-            current_line_start = self.shell_output.index("insert linestart")
-            self.shell_output.delete(current_line_start, "end")
-            self.shell_output.insert("end", "\n^C\n")
-            self.shell_output.insert("end", self.shell_prompt)
-            self.prompt_index = self.shell_output.index("end-1c linestart")
-            self.shell_output.see("end")
-        return "break"
-
-    def execute_terminal_command(self, event):
-        cmd = self.command_buffer.strip()
-        self.command_buffer = ""
-
-        self.shell_output.insert("end", "\n")
-
+    def execute_shell_command(self, event):
+        cmd = self.shell_input.get().strip()
+        
+        if not cmd:
+            return "break" if event else None
+        
+        # Clear input
+        self.shell_input.delete(0, "end")
+        
+        # Show command in output
+        self.append_shell_output(f"$ {cmd}\n")
+        
         if cmd == "clear":
             self.clear_terminal()
-            return "break"
-
+            return "break" if event else None
+        
         if cmd == "exit":
-            self.shell_output.insert("end", "Use the navigation menu to exit.\n")
-            self.shell_output.insert("end", self.shell_prompt)
-            self.prompt_index = self.shell_output.index("end-1c linestart")
-            self.shell_output.see("end")
-            return "break"
-
-        if not cmd:
-            self.shell_output.insert("end", self.shell_prompt)
-            self.prompt_index = self.shell_output.index("end-1c linestart")
-            self.shell_output.see("end")
-            return "break"
-
-        if not self.sel_dev:
-            self.shell_output.insert("end", "[ERROR] No device selected\n")
-            self.shell_output.insert("end", self.shell_prompt)
-            self.prompt_index = self.shell_output.index("end-1c linestart")
-            self.shell_output.see("end")
-            return "break"
-
-        clean = self.sel_dev.split()[0]
-        self.shell_running = True
-
-        def _exec():
+            if self.shell_proc:
+                self.shell_proc.terminate()
+                self.shell_proc = None
+            self.append_shell_output("Shell closed.\n")
+            return "break" if event else None
+        
+        if not self.shell_proc or self.shell_proc.poll() is not None:
+            self.append_shell_output("[ERROR] Shell not connected\n")
+            return "break" if event else None
+        
+        def _run():
             try:
-                self.bk.run_live(
-                    [ADB_PATH, "-s", clean, "shell", cmd],
-                    lambda l: self.after(0, lambda line=l: self.append_output(line) if self.shell_running else None)
-                )
-            finally:
-                self.shell_running = False
-                self.after(0, self.show_new_prompt)
-
-        self.run_bg(_exec)
-        return "break"
-
-    def append_output(self, line):
-        if self.shell_running:
-            self.shell_output.insert("end", line + "\n")
-            self.shell_output.see("end")
-
-    def show_new_prompt(self):
-        self.shell_output.insert("end", self.shell_prompt)
-        self.prompt_index = self.shell_output.index("end-1c linestart")
-        self.shell_output.see("end")
+                # Send command
+                self.shell_proc.stdin.write(f"{cmd}\n")
+                self.shell_proc.stdin.flush()
+                
+                # Send end marker
+                marker = f"__END_CMD_{time.time()}__"
+                self.shell_proc.stdin.write(f"echo '{marker}'\n")
+                self.shell_proc.stdin.flush()
+                
+                # Read until marker
+                output_lines = []
+                while True:
+                    line = self.shell_proc.stdout.readline()
+                    if not line or marker in line:
+                        break
+                    output_lines.append(line)
+                
+                # Show output
+                output = ''.join(output_lines)
+                if output.strip():
+                    self.after(0, lambda: self.append_shell_output(output))
+                
+            except Exception as e:
+                self.after(0, lambda: self.append_shell_output(f"Error: {e}\n"))
+        
+        self.run_bg(_run)
+        return "break" if event else None
 
     # --- LOGCAT ---
     def view_logcat(self):
@@ -1277,7 +1428,7 @@ class XtremeADB(ctk.CTk):
         enabled = self.su_switch.get() == 1
         save_config("use_su", enabled)
         CONF = load_config()
-
+    
 if __name__ == "__main__":
     app = XtremeADB()
     app.mainloop()
