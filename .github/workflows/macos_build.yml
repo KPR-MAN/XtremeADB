@@ -19,9 +19,6 @@ jobs:
           pip install -r requirements.txt
           pip install nuitka pillow zstandard imageio
 
-      - name: Install UPX
-        run: brew install upx
-
       - name: Build with Nuitka
         run: |
           python -m nuitka --mode=app \
@@ -37,7 +34,6 @@ jobs:
           --python-flag=no_warnings \
           --lto=yes \
           --enable-plugin=tk-inter \
-          --enable-plugin=upx \
           xadb.py
 
       - name: Package dist folder as ZIP
