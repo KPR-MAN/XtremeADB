@@ -38,7 +38,7 @@ jobs:
 
       - name: Package dist folder as ZIP
         run: |
-          cd xadb.dist
+          cd xadb.app
           zip -r ../XtremeADB-macos.zip .
           cd ..
 
