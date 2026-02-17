@@ -36,11 +36,15 @@ jobs:
           --enable-plugin=tk-inter \
           xadb.py
 
-      - name: Package dist folder as ZIP
+      - name: Package as ZIP
         run: |
-          cd xadb.app
-          zip -r ../XtremeADB-macos.zip .
-          cd ..
+          zip -r XtremeADB-macos.zip xadb.app/
+
+      - name: Upload ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: XtremeADB-macos
+          path: XtremeADB-macos.zip
 
       - name: Upload ZIP artifact
         uses: actions/upload-artifact@v4
