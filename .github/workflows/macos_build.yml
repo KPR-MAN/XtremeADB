@@ -1,12 +1,9 @@
 name: Build XtremeADB macOS
-
 on:
   workflow_dispatch:
-
 jobs:
   build-macos:
     runs-on: macos-latest
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
@@ -16,21 +13,37 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Upgrade pip and install requirements (skip missing)
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install --ignore-installed --no-cache-dir -r requirements.txt || echo "Some requirements were not found, skipping..."
-          pip install pyinstaller
-          pip install pillow
+          pip install -r requirements.txt
+          pip install nuitka pillow zstandard
 
-      - name: Build with PyInstaller
+      - name: Install UPX
+        run: brew install upx
+
+      - name: Build with Nuitka
         run: |
-          pyinstaller --clean -D --icon xadb.png -w xadb.py
+          python -m nuitka --standalone \
+          --macos-app-icon=xadb.png \
+          --company-name="KPR-MAN" \
+          --product-name="Xtreme ADB" \
+          --file-version=1.3.0.0 \
+          --product-version=1.3.0.0 \
+          --file-description="Xtreme ADB" \
+          --remove-output \
+          --python-flag=no_docstrings \
+          --python-flag=no_asserts \
+          --python-flag=no_warnings \
+          --lto=yes \
+          --enable-plugin=tk-inter \
+          --enable-plugin=upx \
+          xadb.py
 
       - name: Package dist folder as ZIP
         run: |
-          cd dist
-          zip -r ../XtremeADB-macos.zip xadb
+          cd xadb.dist
+          zip -r ../XtremeADB-macos.zip .
           cd ..
 
       - name: Upload ZIP artifact
