@@ -45,9 +45,3 @@ jobs:
         with:
           name: XtremeADB-macos
           path: XtremeADB-macos.zip
-
-      - name: Upload ZIP artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: XtremeADB-macos
-          path: XtremeADB-macos.zip
