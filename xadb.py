@@ -15,12 +15,31 @@ from PIL import Image, ImageTk
 from pathlib import Path
 from CTkMessagebox import CTkMessagebox
 
-if getattr(sys, "frozen", False):
-    import pyi_splash
-else:
-    pyi_splash = None
+# ==========================================
+# SPLASH SCREEN
+# ==========================================
+class SplashScreen:
+    def __init__(self):
+        self.root = ctk.CTk()
+        self.root.overrideredirect(True)
+        self.root.attributes("-topmost", True)
 
+        img = Image.open("splash.png")
+        w, h = img.size
+        self.photo = ctk.CTkImage(light_image=img, dark_image=img, size=(w, h))
 
+        sw = self.root.winfo_screenwidth()
+        sh = self.root.winfo_screenheight()
+        x = (sw - w) // 2
+        y = (sh - h) // 2
+        self.root.geometry(f"{w}x{h}+{x}+{y}")
+
+        ctk.CTkLabel(self.root, image=self.photo, text="").pack()
+        self.root.update()
+
+    def close(self):
+        self.root.withdraw() 
+        
 # ==========================================
 # 1. CORE CONFIGURATION
 # ==========================================
@@ -82,6 +101,7 @@ ctk.set_default_color_theme("dark-blue")
 
 # --- UPDATE CHECKER FUNCTION ---
 def check_for_updates():
+    """Check for updates (standalone function)"""
     try:
         response = requests.get(UPDATE_URL, timeout=5)
         data = response.json()
@@ -93,7 +113,6 @@ def check_for_updates():
         return False, None, None
     except:
         return False, None, None
-
 
 # ==========================================
 # 2. CONSTANTS & PALETTE
@@ -257,6 +276,9 @@ class Backend:
             for line in out.split("\n"):
                 if "\t" in line and "device" in line:
                     devices.append(f"{line.split()[0]} (ADB)")
+            for line in out.split("\n"):
+                if "\t" in line and "recovery" in line:
+                    devices.append(f"{line.split()[0]} (ADB)")
             
             out_fb = self.run([FASTBOOT_PATH, "devices"], timeout=2)
             for line in out_fb.split("\n"):
@@ -308,6 +330,23 @@ class Backend:
 class XtremeADB(ctk.CTk):
     def __init__(self):
         super().__init__()
+        self.withdraw()  # Hide main window during splash
+        
+        splash = ctk.CTkToplevel(self)
+        splash.overrideredirect(True)
+        splash.attributes("-topmost", True)
+        
+        img = Image.open("splash.png")
+        w, h = img.size
+        photo = ctk.CTkImage(light_image=img, dark_image=img, size=(w, h))
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        x = (sw - w) // 2
+        y = (sh - h) // 2
+        splash.geometry(f"{w}x{h}+{x}+{y}")
+        ctk.CTkLabel(splash, image=photo, text="").pack()
+        splash.update()
+        
         self.title(APP_NAME)
         self.geometry("1400x900")
         self.configure(fg_color=C["bg_root"])
@@ -327,7 +366,7 @@ class XtremeADB(ctk.CTk):
         self.grid_rowconfigure(0, weight=1)
 
         self.init_ui()
-        
+        splash.destroy() # Stop showing the splash screen
         if os.name == "nt":
             self.after(0, lambda: self.state('zoomed'))  # Windows
         else:
@@ -350,34 +389,37 @@ class XtremeADB(ctk.CTk):
         threading.Thread(target=self.dev_loop, daemon=True).start()
         threading.Thread(target=self.stats_loop, daemon=True).start()
 
-        # Close PyInstaller splash when main window is ready
-        if pyi_splash:
-            self.after(500, pyi_splash.close)
-           
         # Check for Updates
-        if CONF["check_updates"]:
-            has_update, new_ver, url = check_for_updates()
-            if has_update:
-                msg = CTkMessagebox(
-                    title="Update Available",
-                    message=f"A update is available (v{new_ver}) !\n\nWould you like to download it?",
-                    icon="info",
-                    option_1="Download",
-                    option_2="Remind me later",
-                    option_3="Never remind"
-                )
+        self.after(1000, self.check_updates_async)
         
-                # Manually color the buttons after creation
-                msg.button_1.configure(fg_color="green", hover_color="darkgreen")
-                msg.button_2.configure(fg_color="orange", hover_color="darkorange")
-                msg.button_3.configure(fg_color="red", hover_color="darkred")
         
-                response = msg.get()
-                if response == "Download":
-                    import webbrowser
-                    webbrowser.open(url)
-                elif response == "Never remind":
-                    save_config("check_updates", False)
+    def check_updates_async(self):
+        """Check for updates after UI is loaded"""
+        if not CONF["check_updates"]:
+            return
+            
+        has_update, new_ver, url = check_for_updates()
+        if has_update:
+            msg = CTkMessagebox(
+                title="Update Available",
+                message=f"A update is available (v{new_ver}) !\n\nWould you like to download it?",
+                icon="info",
+                option_1="Download",
+                option_2="Remind me later",
+                option_3="Never remind"
+            )
+            # Manually color the buttons after creation
+            msg.button_1.configure(fg_color="green", hover_color="darkgreen")
+            msg.button_2.configure(fg_color="orange", hover_color="darkorange")
+            msg.button_3.configure(fg_color="red", hover_color="darkred")
+            
+            response = msg.get()
+            if response == "Download":
+                import webbrowser
+                webbrowser.open(url)
+            elif response == "Never remind":
+                save_config("check_updates", False)
+
     
 
     def run_bg(self, func):
