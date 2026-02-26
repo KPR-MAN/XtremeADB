@@ -12,7 +12,8 @@ jobs:
         with:
           usesh: true
           prepare: |
-            pkg install -y python310 py310-pip py310-tk
+            pkg install -y python310 py310-tkinter
+            python3.10 -m ensurepip
             python3.10 -m pip install --upgrade pip
             python3.10 -m pip install nuitka pillow zstandard imageio
             python3.10 -m pip install -r requirements.txt
