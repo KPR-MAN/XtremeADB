@@ -1,0 +1,41 @@
+name: Build XtremeADB FreeBSD
+on:
+  workflow_dispatch:
+jobs:
+  build-freebsd:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+      - name: Build inside FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          usesh: true
+          prepare: |
+            pkg install -y python310 py310-pip py310-tk
+            python3.10 -m pip install --upgrade pip
+            python3.10 -m pip install nuitka pillow zstandard imageio
+            python3.10 -m pip install -r requirements.txt
+          run: |
+            python3.10 -m nuitka --standalone \
+              --linux-icon=xadb.png \
+              --company-name="KPR-MAN" \
+              --product-name="Xtreme ADB" \
+              --file-version=1.3.0.0 \
+              --product-version=1.3.0.0 \
+              --file-description="Xtreme ADB" \
+              --remove-output \
+              --python-flag=no_docstrings \
+              --python-flag=no_asserts \
+              --python-flag=no_warnings \
+              --lto=yes \
+              --enable-plugin=tk-inter \
+              xadb.py
+      - name: Package as ZIP
+        run: |
+          zip -r XtremeADB-freebsd.zip xadb.dist/
+      - name: Upload ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: XtremeADB-freebsd
+          path: XtremeADB-freebsd.zip
