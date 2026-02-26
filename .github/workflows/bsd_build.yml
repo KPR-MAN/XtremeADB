@@ -1,29 +1,44 @@
 name: Build XtremeADB FreeBSD
+
 on:
   workflow_dispatch:
+
 jobs:
   build-freebsd:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+
       - name: Build inside FreeBSD VM
         uses: vmactions/freebsd-vm@v1
         with:
+          release: "14.2"
           usesh: true
+          # Pre-built packages = no compiling from source = fast
           prepare: |
-            pkg install -y python310 py310-tkinter
-            python3.10 -m ensurepip
-            python3.10 -m pip install --upgrade pip
-            python3.10 -m pip install nuitka pillow zstandard imageio
-            python3.10 -m pip install -r requirements.txt
+            pkg install -y \
+              python310 \
+              py310-tkinter \
+              py310-pillow \
+              py310-numpy \
+              py310-zstandard \
+              jpeg-turbo \
+              png
+            python3.10 -m ensurepip --upgrade
+            python3.10 -m pip install --upgrade pip --quiet
+            python3.10 -m pip install nuitka imageio --quiet
+            python3.10 -m pip install -r requirements.txt --quiet
+
           run: |
             python3.10 -m nuitka --standalone \
               --linux-icon=xadb.png \
               --company-name="KPR-MAN" \
               --product-name="Xtreme ADB" \
-              --file-version=1.3.0.0 \
-              --product-version=1.3.0.0 \
+              --file-version=2.0.0.0 \
+              --product-version=2.0.0.0 \
               --file-description="Xtreme ADB" \
               --remove-output \
               --python-flag=no_docstrings \
@@ -31,12 +46,15 @@ jobs:
               --python-flag=no_warnings \
               --lto=yes \
               --enable-plugin=tk-inter \
+              --jobs=4 \
               xadb.py
+
       - name: Package as ZIP
-        run: |
-          zip -r XtremeADB-freebsd.zip xadb.dist/
-      - name: Upload ZIP artifact
+        run: zip -r XtremeADB-freebsd.zip xadb.dist/
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: XtremeADB-freebsd
           path: XtremeADB-freebsd.zip
+          retention-days: 7
