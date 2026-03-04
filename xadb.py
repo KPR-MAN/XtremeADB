@@ -20,6 +20,7 @@ from CTkMessagebox import CTkMessagebox
 # ==========================================
 class SplashScreen:
     def __init__(self):
+        self.bk = Backend()
         self.root = ctk.CTk()
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
@@ -38,14 +39,14 @@ class SplashScreen:
         self.root.update()
 
     def close(self):
-        self.root.withdraw() 
-        
+        self.root.withdraw()
+
 # ==========================================
 # 1. CORE CONFIGURATION
 # ==========================================
-APP_NAME = "Xtreme ADB V1.3"
+APP_NAME = "Xtreme ADB V2.0"
 LOG_FILE = "xtreme_log.txt"
-CURRENT_VERSION = "1.3"
+CURRENT_VERSION = "2.0"
 UPDATE_URL = "https://raw.githubusercontent.com/KPR-MAN/XtremeADB/main/version.json"
 
 DEFAULT_CONFIG = {
@@ -55,7 +56,11 @@ DEFAULT_CONFIG = {
     "refresh_interval": 3,
     "check_updates": True,
     "scrcpy_args": "--max-size 1024 --video-bit-rate 8M",
-    "use_su": False
+    "use_su": False,
+    "app_sort": "a_z",
+    "file_sort": "a_z",
+    "suppress_multi_device_warn": False,
+    "device_poll_interval": 2
 }
 
 if os.name == 'nt':
@@ -107,7 +112,7 @@ def check_for_updates():
         data = response.json()
         latest_version = data["version"]
         download_url = data["download_url"]
-        
+
         if version.parse(latest_version) > version.parse(CURRENT_VERSION):
             return True, latest_version, download_url
         return False, None, None
@@ -146,7 +151,7 @@ class FluentButton(ctk.CTkButton):
         super().__init__(master, **kwargs)
         self.default_color = kwargs.get("fg_color", "transparent")
         self.default_text_color = kwargs.get("text_color", C["text_sub"])
-        
+
 
     def set_active(self, is_active):
         if is_active:
@@ -196,19 +201,19 @@ class LogConsole(ctk.CTkFrame):
         super().__init__(master, fg_color=C["bg_surface"], corner_radius=10, **kwargs)
         self.pack_propagate(False)
         self.configure(height=height)
-        
+
         # Header
         header = ctk.CTkFrame(self, height=25, fg_color="transparent")
         header.pack(fill="x", padx=5, pady=2)
         ctk.CTkLabel(header, text="> Terminal Output", font=("Consolas", 11, "bold"), text_color=C["text_sub"]).pack(side="left")
-        ctk.CTkButton(header, text="Clear", width=50, height=20, fg_color=C["input_bg"], text_color=C["text_main"], 
+        ctk.CTkButton(header, text="Clear", width=50, height=20, fg_color=C["input_bg"], text_color=C["text_main"],
                       font=("Segoe UI", 10), command=self.clear).pack(side="right")
 
         # Text Area
         self.text_area = ctk.CTkTextbox(
-            self, 
-            font=("Consolas", 12), 
-            fg_color=C["term_bg"], 
+            self,
+            font=("Consolas", 12),
+            fg_color=C["term_bg"],
             text_color=C["term_fg"],
             activate_scrollbars=True
         )
@@ -260,7 +265,7 @@ class Backend:
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, encoding="utf-8", errors="replace", startupinfo=startupinfo
             )
-            
+
             for line in iter(process.stdout.readline, ''):
                 if line:
                     callback(line.strip())
@@ -271,20 +276,35 @@ class Backend:
 
     def get_devices(self):
         devices = []
+        problem_serials = set()
         try:
-            out = self.run([ADB_PATH, "devices"], timeout=2)
+            out = self.run([ADB_PATH, "devices"], timeout=5)
             for line in out.split("\n"):
-                if "\t" in line and "device" in line:
-                    devices.append(f"{line.split()[0]} (ADB)")
-            for line in out.split("\n"):
-                if "\t" in line and "recovery" in line:
-                    devices.append(f"{line.split()[0]} (ADB)")
-            
-            out_fb = self.run([FASTBOOT_PATH, "devices"], timeout=2)
+                line = line.strip()
+                if "\t" not in line:
+                    continue
+                serial, status = line.split("\t", 1)
+                status = status.strip()
+                if status == "device":
+                    devices.append(f"{serial} (ADB)")
+                elif status == "recovery":
+                    devices.append(f"{serial} (RECOVERY)")
+                elif status in ("unauthorized", "offline", "no permissions"):
+                    problem_serials.add(serial)
+
+            out_fb = self.run([FASTBOOT_PATH, "devices"], timeout=5)
             for line in out_fb.split("\n"):
+                line = line.strip()
                 if "\t" in line:
-                    devices.append(f"{line.split()[0]} (FASTBOOT)")
-        except: pass
+                    serial = line.split("\t")[0].strip()
+                    if serial:
+                        devices.append(f"{serial} (FASTBOOT)")
+        except:
+            pass
+
+        if problem_serials:
+            self._problem_serials = problem_serials
+            
         return devices
 
     def get_stats(self, device_id):
@@ -331,11 +351,11 @@ class XtremeADB(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.withdraw()  # Hide main window during splash
-        
+
         splash = ctk.CTkToplevel(self)
         splash.overrideredirect(True)
         splash.attributes("-topmost", True)
-        
+
         img = Image.open("splash.png")
         w, h = img.size
         photo = ctk.CTkImage(light_image=img, dark_image=img, size=(w, h))
@@ -346,12 +366,12 @@ class XtremeADB(ctk.CTk):
         splash.geometry(f"{w}x{h}+{x}+{y}")
         ctk.CTkLabel(splash, image=photo, text="").pack()
         splash.update()
-        
+
         self.title(APP_NAME)
         self.geometry("1400x900")
         self.configure(fg_color=C["bg_root"])
         self.minsize(1100, 700)
-        
+
         self.bk = Backend()
         self.sel_dev = None
         self.cur_path = "/sdcard/"
@@ -361,6 +381,7 @@ class XtremeADB(ctk.CTk):
         self.monitor_active = False
         self.file_buttons = []
         self.consoles = {}
+        self.ctrl_pressed = False
 
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -391,13 +412,13 @@ class XtremeADB(ctk.CTk):
 
         # Check for Updates
         self.after(1000, self.check_updates_async)
-        
-        
+
+
     def check_updates_async(self):
         """Check for updates after UI is loaded"""
         if not CONF["check_updates"]:
             return
-            
+
         has_update, new_ver, url = check_for_updates()
         if has_update:
             msg = CTkMessagebox(
@@ -412,7 +433,7 @@ class XtremeADB(ctk.CTk):
             msg.button_1.configure(fg_color="green", hover_color="darkgreen")
             msg.button_2.configure(fg_color="orange", hover_color="darkorange")
             msg.button_3.configure(fg_color="red", hover_color="darkred")
-            
+
             response = msg.get()
             if response == "Download":
                 import webbrowser
@@ -420,7 +441,7 @@ class XtremeADB(ctk.CTk):
             elif response == "Never remind":
                 save_config("check_updates", False)
 
-    
+
 
     def run_bg(self, func):
         threading.Thread(target=func, daemon=True).start()
@@ -447,6 +468,7 @@ class XtremeADB(ctk.CTk):
             ("⚡", "Fastboot", self.view_fastboot),
             ("🔧", "Tweaks", self.view_tweaks),
             ("🔄", "Backup", self.view_backup),
+            ("📲", "Devices", self.view_devices),
             ("⚙️", "Settings", self.view_settings),
         ]
 
@@ -466,6 +488,10 @@ class XtremeADB(ctk.CTk):
         # Main content
         self.main = ctk.CTkFrame(self, corner_radius=0, fg_color=C["bg_root"])
         self.main.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
+        self.bind_all("<Control_L>", lambda e: setattr(self, 'ctrl_pressed', True))
+        self.bind_all("<KeyRelease-Control_L>", lambda e: setattr(self, 'ctrl_pressed', False))
+        self.bind_all("<Control_R>", lambda e: setattr(self, 'ctrl_pressed', True))
+        self.bind_all("<KeyRelease-Control_R>", lambda e: setattr(self, 'ctrl_pressed', False))
         self.view_dash()
 
     def highlight(self, name):
@@ -509,20 +535,92 @@ class XtremeADB(ctk.CTk):
         self.run_bg(_exec)
 
     def dev_loop(self):
+        self._pause_dev_loop = False
+        self._last_device_list = []
+        self._warned_serials = set()
         while True:
             try:
-                devices = self.bk.get_devices()
-                if devices:
-                    if self.sel_dev not in devices:
-                        self.sel_dev = devices[0]
-                    self.status_dot.configure(text_color=C["success"])
-                    self.status_lbl.configure(text="Ready")
-                else:
-                    self.sel_dev = None
-                    self.status_dot.configure(text_color=C["danger"])
-                    self.status_lbl.configure(text="None")
-            except: pass
-            time.sleep(2)
+                if not self._pause_dev_loop:
+                    devices = self.bk.get_devices()
+                    problem = getattr(self.bk, '_problem_serials', set())
+                    self.bk._problem_serials = set()  # reset every cycle
+                    new_problems = problem - self._warned_serials
+                    if new_problems:
+                        self._warned_serials.update(new_problems)
+                        serials_str = ", ".join(new_problems)
+                        self.after(0, lambda s=serials_str: CTkMessagebox(
+                            title="Unauthorized or Offline Device Detected",
+                            message=f"Device(s) [{s}] are not ready.\n\nMake sure your phone screen is unlocked and tap 'Allow' on the USB debugging authorization prompt. If you already did, try unplugging and replugging the cable.",
+                            icon="warning",
+                            option_1="Ok"
+                        ))
+                    # If a serial is no longer problem, remove from warned so it can warn again if replugged
+                    self._warned_serials &= problem                    
+                    if devices:
+                        if self.sel_dev not in devices:
+                            if len(devices) == 1:
+                                self.sel_dev = devices[0]
+                            elif devices != self._last_device_list:
+                                self.after(0, lambda d=devices: self.prompt_device_select(d))
+                        if devices != self._last_device_list:
+                            self.after(0, self._on_device_list_changed)
+                        self._last_device_list = devices
+                        sel = self.sel_dev
+                        self.after(0, lambda: self.status_dot.configure(text_color=C["success"]))
+                        self.after(0, lambda s=sel: self.status_lbl.configure(text=s.split()[0] if s else "Ready"))
+                    else:
+                        if self._last_device_list:
+                            self.after(0, self._on_device_list_changed)
+                        self._last_device_list = []
+                        if self.sel_dev is not None:
+                            self.sel_dev = None
+                            self.after(0, lambda: self.status_dot.configure(text_color=C["danger"]))
+                            self.after(0, lambda: self.status_lbl.configure(text="None"))
+            except:
+                pass
+            time.sleep(CONF.get("device_poll_interval", 2))
+
+    def prompt_device_select(self, devices):
+        if CONF.get("suppress_multi_device_warn", False):
+            self.sel_dev = devices[0]
+            return
+
+        dev = devices[0]
+        serial = dev.split()[0]
+        mode = dev.split("(")[1].replace(")", "") if "(" in dev else ""
+        if "ADB" in mode:
+            model = self.bk.run([ADB_PATH, "-s", serial, "shell", "getprop", "ro.product.model"]).strip()
+            friendly = f"{model or serial} [{serial}]"
+        else:
+            friendly = f"{serial} ({mode})"
+        self.sel_dev = dev
+
+        if hasattr(self, '_multi_dev_banner') and self._multi_dev_banner.winfo_exists():
+            self._multi_dev_banner.destroy()
+
+        banner = ctk.CTkFrame(self.main, fg_color="#4a3800", corner_radius=10,
+                              border_width=1, border_color=C["warning"])
+        banner.pack(fill="x", pady=(0, 10), before=self.main.winfo_children()[0])
+        self._multi_dev_banner = banner
+
+        msg = f"⚠  Multiple devices detected — Please select one in the Devices menu.\nCurrently active: {friendly}"
+        ctk.CTkLabel(banner, text=msg, text_color="#FFD966",
+                     font=("Segoe UI", 12), justify="left").pack(side="left", padx=15, pady=10)
+
+        btn_frame = ctk.CTkFrame(banner, fg_color="transparent")
+        btn_frame.pack(side="right", padx=10)
+
+        def dismiss():
+            banner.destroy()
+
+        def dont_warn():
+            save_config("suppress_multi_device_warn", True)
+            global CONF
+            CONF = load_config()
+            banner.destroy()
+
+        ctk.CTkButton(btn_frame, text="Don't warn me again", width=150, height=28,
+                      fg_color="#555", command=dont_warn).pack(side="left", padx=5)
 
     def stats_loop(self):
         while True:
@@ -541,12 +639,16 @@ class XtremeADB(ctk.CTk):
                 pass
             time.sleep(CONF.get("refresh_interval", 3))
 
+    def _on_device_list_changed(self):
+        if hasattr(self, 'dev_list_frame') and self.dev_list_frame.winfo_exists():
+            self._refresh_device_list()
+
     # ================= VIEWS =================
 
     def view_dash(self):
         self.clear()
         self.highlight("Dashboard")
-        
+
         ctk.CTkLabel(self.main, text="Dashboard", font=("Segoe UI", 36, "bold"), text_color=C["text_main"]).pack(anchor="w", pady=(10, 10))
 
         # Info Row
@@ -595,7 +697,7 @@ class XtremeADB(ctk.CTk):
         self.clear()
         self.highlight("Screen")
         ctk.CTkLabel(self.main, text="Screen Tools", font=("Segoe UI", 36, "bold"), text_color=C["text_main"]).pack(anchor="w", pady=(10, 20))
-        
+
         grid = ctk.CTkFrame(self.main, fg_color="transparent")
         grid.pack(fill="x", pady=10)
 
@@ -695,18 +797,31 @@ class XtremeADB(ctk.CTk):
     def view_apps(self):
         self.clear()
         self.highlight("Apps")
+        self.sel_pkgs = []
         ctk.CTkLabel(self.main, text="App Manager", font=("Segoe UI", 36, "bold"), text_color=C["text_main"]).pack(
             anchor="w", pady=(10, 20))
 
         bar = ctk.CTkFrame(self.main, fg_color=C["bg_surface"], corner_radius=10)
-        bar.pack(fill="x", pady=(0, 10), ipady=5)
+        bar.pack(fill="x", pady=(0, 5), ipady=5)
         self.app_search = ctk.CTkEntry(bar, placeholder_text="Search apps...", border_width=0, fg_color=C["input_bg"],
                                        height=40, text_color=C["text_main"])
         self.app_search.pack(side="left", fill="x", expand=True, padx=10, pady=10)
-        self.app_search.bind("<KeyRelease>", lambda e: self.filter_apps())
+        self.app_search.bind("<KeyRelease>",
+                             lambda e: self.filter_apps() if e.keysym not in ("Control_L", "Control_R") else None)
         ctk.CTkButton(bar, text="Refresh", fg_color=C["primary"], command=self.load_apps).pack(side="left", padx=5)
         ctk.CTkButton(bar, text="Install APK", fg_color=C["success"], command=self.install_apk).pack(side="left",
                                                                                                      padx=10)
+
+        # Sort bar
+        sort_bar = ctk.CTkFrame(self.main, fg_color="transparent")
+        sort_bar.pack(fill="x", pady=(0, 5))
+        ctk.CTkLabel(sort_bar, text="Sort:", font=("Segoe UI", 11), text_color=C["text_sub"]).pack(side="left",
+                                                                                                   padx=(5, 8))
+        self._app_sort = ctk.StringVar(value=CONF.get("app_sort", "a_z"))
+        for label, val in [("A→Z", "a_z"), ("Z→A", "z_a")]:
+            ctk.CTkRadioButton(sort_bar, text=label, variable=self._app_sort, value=val,
+                               font=("Segoe UI", 11), text_color=C["text_sub"],
+                               command=self._on_app_sort_change).pack(side="left", padx=6)
 
         split = ctk.CTkFrame(self.main, fg_color="transparent")
         split.pack(fill="both", expand=True)
@@ -715,18 +830,22 @@ class XtremeADB(ctk.CTk):
 
         act = ctk.CTkFrame(split, width=250, fg_color=C["bg_surface"], corner_radius=15)
         act.pack(side="right", fill="y")
-        ctk.CTkLabel(act, text="Selected App", font=("Segoe UI", 14, "bold"), text_color=C["text_main"]).pack(pady=20)
-        self.lbl_pkg = ctk.CTkLabel(act, text="None", text_color="gray", wraplength=200)
-        self.lbl_pkg.pack(pady=5)
-        self.sel_pkg = None
+        ctk.CTkLabel(act, text="Actions", font=("Segoe UI", 14, "bold"), text_color=C["text_main"]).pack(pady=(20, 5))
+        self.lbl_pkg = ctk.CTkLabel(act, text="None selected", text_color="gray", wraplength=200, font=("Segoe UI", 11))
+        self.lbl_pkg.pack(pady=(0, 15))
 
-        ctk.CTkButton(act, text="Uninstall", fg_color=C["danger"], command=self.do_uninst).pack(fill="x", padx=20,
-                                                                                                pady=5)
+        ctk.CTkButton(act, text="Uninstall Selected", fg_color=C["danger"], command=self.do_uninst).pack(fill="x",
+                                                                                                         padx=20,
+                                                                                                         pady=5)
+        ctk.CTkButton(act, text="Force Uninstall", fg_color="#8B0000",
+                      command=self.do_force_uninst).pack(fill="x", padx=20, pady=5)
         ctk.CTkButton(act, text="Force Stop", fg_color=C["warning"], command=self.do_force).pack(fill="x", padx=20,
                                                                                                  pady=5)
         ctk.CTkButton(act, text="Clear Data", fg_color="#555", command=self.do_clear).pack(fill="x", padx=20, pady=5)
         ctk.CTkButton(act, text="Extract APK", fg_color=C["primary"], command=self.do_extract).pack(fill="x", padx=20,
                                                                                                     pady=5)
+        ctk.CTkButton(act, text="Deselect All", fg_color=C["input_bg"], text_color=C["text_main"],
+                      command=self.deselect_all_apps).pack(fill="x", padx=20, pady=(15, 5))
 
         self.app_console = LogConsole(self.main, height=150)
         self.app_console.pack(fill="x", pady=(10, 0))
@@ -750,25 +869,64 @@ class XtremeADB(ctk.CTk):
     def filter_apps(self):
         search = self.app_search.get().lower()
         filtered = [p for p in self.all_apps if search in p.lower()]
+        sort = self._app_sort.get() if hasattr(self, '_app_sort') else CONF.get("app_sort", "a_z")
+        if sort == "z_a":
+            filtered = list(reversed(filtered))
         self.after(0, lambda: self._populate_app_list(filtered, len(self.all_apps)))
 
+    def _on_app_sort_change(self):
+        save_config("app_sort", self._app_sort.get())
+        global CONF
+        CONF = load_config()
+        self.filter_apps()
+
     def _populate_app_list(self, pkgs, total):
-        for w in self.app_list.winfo_children(): w.destroy()
+        for w in self.app_list.winfo_children():
+            w.destroy()
+        self._app_buttons = {}
         for p in pkgs:
-            ctk.CTkButton(
+            btn = ctk.CTkButton(
                 self.app_list,
                 text=p,
                 anchor="w",
                 fg_color="transparent",
                 hover_color=C["bg_hover"],
                 text_color=C["text_main"],
-                command=lambda x=p: self.set_app(x)
-            ).pack(fill="x")
+                command=lambda x=p: self.toggle_app_select(x)
+            )
+            btn.pack(fill="x")
+            self._app_buttons[p] = btn
         self.app_console.log(f"Loaded {total} apps (showing {len(pkgs)}).")
 
-    def set_app(self, p):
-        self.sel_pkg = p
-        self.lbl_pkg.configure(text=p)
+    def toggle_app_select(self, p):
+        if p in self.sel_pkgs:
+            # always allow deselect with normal click
+            self.sel_pkgs.remove(p)
+            self._app_buttons[p].configure(fg_color="transparent")
+        else:
+            if not self.ctrl_pressed and len(self.sel_pkgs) > 0:
+                # no ctrl = clear previous selection first
+                for prev in self.sel_pkgs:
+                    if prev in self._app_buttons:
+                        self._app_buttons[prev].configure(fg_color="transparent")
+                self.sel_pkgs = []
+            self.sel_pkgs.append(p)
+            self._app_buttons[p].configure(fg_color=C["bg_hover"])
+
+        count = len(self.sel_pkgs)
+        if count == 0:
+            self.lbl_pkg.configure(text="None selected")
+        elif count == 1:
+            self.lbl_pkg.configure(text=self.sel_pkgs[0])
+        else:
+            self.lbl_pkg.configure(text=f"{count} packages selected")
+
+    def deselect_all_apps(self):
+        for p in self.sel_pkgs:
+            if p in self._app_buttons:
+                self._app_buttons[p].configure(fg_color="transparent")
+        self.sel_pkgs = []
+        self.lbl_pkg.configure(text="None selected")
 
     def install_apk(self):
         files = filedialog.askopenfilenames(filetypes=[("APK", "*.apk")])  # Note: askopenfileNAMES (plural)
@@ -780,36 +938,94 @@ class XtremeADB(ctk.CTk):
             self.app_console.log("All installations queued!")
 
     def do_uninst(self):
-        if self.sel_pkg: 
-            self.adb_cmd_console(["uninstall", self.sel_pkg])
-            self.after(1000, self.load_apps)
+        if not self.sel_pkgs:
+            self.app_console.log("[ERROR] No packages selected.")
+            return
+        pkgs = self.sel_pkgs.copy()
+
+        def _run():
+            for pkg in pkgs:
+                self.app_console.log(f"Uninstalling {pkg}...")
+                self.bk.run_live([ADB_PATH, "-s", self.sel_dev.split()[0], "uninstall", pkg],
+                                 lambda l: self.app_console.log(l))
+            self.after(500, self.load_apps)
+            self.after(500, self.deselect_all_apps)
+
+        self.run_bg(_run)
+
+    def do_force_uninst(self):
+        if not self.sel_pkgs:
+            self.app_console.log("[ERROR] No packages selected.")
+            return
+        pkgs = self.sel_pkgs.copy()
+        if not messagebox.askyesno("Force Uninstall",
+                                   f"Force uninstall {len(pkgs)} package(s)?\nThis uses -k --user 0 and works on system apps."):
+            return
+
+        def _run():
+            for pkg in pkgs:
+                self.app_console.log(f"Force uninstalling {pkg}...")
+                self.bk.run_live(
+                    [ADB_PATH, "-s", self.sel_dev.split()[0], "shell", "pm", "uninstall", "-k", "--user", "0", pkg],
+                    lambda l: self.app_console.log(l))
+            self.after(500, self.load_apps)
+            self.after(500, self.deselect_all_apps)
+
+        self.run_bg(_run)
 
     def do_force(self):
-        if self.sel_pkg: self.adb_cmd_console(["shell", "am", "force-stop", self.sel_pkg])
+        if not self.sel_pkgs:
+            self.app_console.log("[ERROR] No packages selected.")
+            return
+        for pkg in self.sel_pkgs:
+            self.adb_cmd_console(["shell", "am", "force-stop", pkg])
 
     def do_clear(self):
-        if self.sel_pkg: self.adb_cmd_console(["shell", "pm", "clear", self.sel_pkg])
+        if not self.sel_pkgs:
+            self.app_console.log("[ERROR] No packages selected.")
+            return
+        for pkg in self.sel_pkgs:
+            self.adb_cmd_console(["shell", "pm", "clear", pkg])
 
     def do_extract(self):
-        if not self.sel_pkg: return
+        if not self.sel_pkgs:
+            self.app_console.log("[ERROR] No packages selected.")
+            return
         d = filedialog.askdirectory()
-        if d:
-            cln = self.sel_dev.split()[0]
-            def _t():
-                path_out = self.bk.run([ADB_PATH, "-s", cln, "shell", "pm", "path", self.sel_pkg])
-                if "package:" in path_out:
-                    apk_path = path_out.replace("package:", "").strip()
-                    self.app_console.log(f"Pulling {apk_path}...")
-                    self.bk.run_live([ADB_PATH, "-s", cln, "pull", apk_path, f"{d}/{self.sel_pkg}.apk"], lambda l: self.app_console.log(l))
-                    self.app_console.log("Extraction Complete.")
-            self.run_bg(_t)
+        if not d:
+            return
+        pkgs = self.sel_pkgs.copy()
+        cln = self.sel_dev.split()[0]
+
+        def _t():
+            for pkg in pkgs:
+                path_out = self.bk.run([ADB_PATH, "-s", cln, "shell", "pm", "path", pkg])
+                apk_paths = [line.replace("package:", "").strip() for line in path_out.split("\n") if
+                             "package:" in line]
+                if not apk_paths:
+                    self.app_console.log(f"[ERROR] Could not find APK path for {pkg}")
+                    continue
+                pkg_dir = os.path.join(d, pkg)
+                os.makedirs(pkg_dir, exist_ok=True)
+                for apk_path in apk_paths:
+                    filename = os.path.basename(apk_path)
+                    local_path = os.path.join(pkg_dir, filename)
+                    self.app_console.log(f"Pulling {filename}...")
+                    self.bk.run_live(
+                        [ADB_PATH, "-s", cln, "pull", apk_path, local_path],
+                        lambda l: self.app_console.log(l)
+                    )
+                self.app_console.log(f"✓ {pkg} → {pkg_dir}")
+            self.app_console.log("Extraction complete.")
+
+        self.run_bg(_t)
 
     # --- FILES ---
     def view_files(self):
         self.clear()
         self.highlight("Files")
         ctk.CTkLabel(self.main, text="File Explorer", font=("Segoe UI", 36, "bold"), text_color=C["text_main"]).pack(anchor="w", pady=(10, 20))
-        
+
         nav = ctk.CTkFrame(self.main, fg_color=C["bg_surface"])
         nav.pack(fill="x", pady=10)
         ctk.CTkButton(nav, text="⬆", width=40, command=self.fm_up, fg_color="#333").pack(side="left", padx=10, pady=10)
@@ -817,24 +1033,32 @@ class XtremeADB(ctk.CTk):
         self.fm_ent.pack(side="left", fill="x", expand=True)
         self.fm_ent.bind("<Return>", lambda e: self.fm_load())
         ctk.CTkButton(nav, text="Go", width=60, command=self.fm_load, fg_color=C["primary"]).pack(side="left", padx=10)
-        
+
         bar = ctk.CTkFrame(self.main, fg_color="transparent")
         bar.pack(fill="x", pady=10)
         ops = [("New Folder", self.fm_mkdir), ("Delete", self.fm_del), ("Rename", self.fm_ren), ("Upload", self.fm_upload), ("Download", self.fm_download_single)]
         for label, cmd in ops:
             ctk.CTkButton(bar, text=label, width=80, fg_color=C["input_bg"], hover_color=C["bg_hover"], text_color=C["text_main"], command=cmd).pack(side="left", padx=5)
-        
+
+        # Sort bar
+        fsort_bar = ctk.CTkFrame(self.main, fg_color="transparent")
+        fsort_bar.pack(fill="x", pady=(0, 5))
+        ctk.CTkLabel(fsort_bar, text="Sort:", font=("Segoe UI", 11), text_color=C["text_sub"]).pack(side="left",
+                                                                                                        padx=(5, 8))
+        self._file_sort = ctk.StringVar(value=CONF.get("file_sort", "a_z"))
+        for label, val in [("A→Z", "a_z"), ("Z→A", "z_a"), ("Folders first", "folders_first"),
+                            ("Files first", "files_first")]:
+            ctk.CTkRadioButton(fsort_bar, text=label, variable=self._file_sort, value=val,
+                                font=("Segoe UI", 11), text_color=C["text_sub"],
+                                command=self._on_file_sort_change).pack(side="left", padx=6)
+
         self.fm_list = ctk.CTkScrollableFrame(self.main, fg_color=C["bg_surface"], corner_radius=15)
         self.fm_list.pack(fill="both", expand=True)
         self.fm_sel = None
         self.fm_selected = []  # Track multiple selections
         self.ctrl_pressed = False  # Track Ctrl key
-        self.bind_all("<Control_L>", lambda e: setattr(self, 'ctrl_pressed', True))
-        self.bind_all("<KeyRelease-Control_L>", lambda e: setattr(self, 'ctrl_pressed', False))
-        self.bind_all("<Control_R>", lambda e: setattr(self, 'ctrl_pressed', True))
-        self.bind_all("<KeyRelease-Control_R>", lambda e: setattr(self, 'ctrl_pressed', False))
         self.fm_ent.insert(0, self.cur_path)
-        
+
         self.fm_console = LogConsole(self.main, height=120)
         self.fm_console.pack(fill="x", pady=(10, 0))
         self.fm_load()
@@ -854,38 +1078,57 @@ class XtremeADB(ctk.CTk):
                 self.after(0, lambda: self.fm_console.log("Error reading directory."))
                 return
             items = [x.strip() for x in out.split("\n") if x.strip()]
-            
+
             if not items:
                 self.after(0, lambda: self.fm_console.log("Directory is empty."))
                 return
-            
+
             items_with_type = []
             folder_count = 0
             file_count = 0
-            
+
             for item in items:
                 test_cmd = f"[ -d '{path.rstrip('/')}/{item}' ] && echo DIR || echo FILE"
                 result = self.bk.run([ADB_PATH, "-s", cln, "shell", test_cmd]).strip()
                 is_dir = "DIR" in result
                 display_name = f"{item}/" if is_dir else item
                 items_with_type.append(display_name)
-                
+
                 if is_dir:
                     folder_count += 1
                 else:
                     file_count += 1
-            
+
             self.after(0, lambda: self._populate_file_list(items_with_type))
             self.after(0, lambda: self.fm_console.log(f"Listed: {file_count} file(s), {folder_count} folder(s)"))
 
         self.run_bg(_t)
 
     def _populate_file_list(self, items):
+        sort = self._file_sort.get() if hasattr(self, '_file_sort') else CONF.get("file_sort", "a_z")
+        dirs = [i for i in items if i.endswith("/")]
+        files = [i for i in items if not i.endswith("/")]
+        if sort == "a_z":
+            dirs.sort();
+            files.sort()
+            items = dirs + files
+        elif sort == "z_a":
+            dirs.sort(reverse=True);
+            files.sort(reverse=True)
+            items = dirs + files
+        elif sort == "folders_first":
+            dirs.sort();
+            files.sort()
+            items = dirs + files
+        elif sort == "files_first":
+            files.sort();
+            dirs.sort()
+            items = files + dirs
+
         for item in items:
             is_dir = item.endswith("/")
             col = C["primary"] if is_dir else C["text_main"]
             icon = "📁" if is_dir else "📄"
-            
             btn = ctk.CTkButton(
                 self.fm_list,
                 text=f"{icon}  {item}",
@@ -896,14 +1139,17 @@ class XtremeADB(ctk.CTk):
                 command=lambda n=item: self.fm_click_item(n)
             )
             btn.pack(fill="x")
-            
             if is_dir:
                 btn.bind("<Double-Button-1>", lambda e, x=item: self.fm_ent_dir(x))
-            
             btn.bind("<Button-3>", lambda e, name=item: self.show_file_context_menu(e, name))
-            
             self.file_buttons.append((btn, item))
-            
+
+    def _on_file_sort_change(self):
+        save_config("file_sort", self._file_sort.get())
+        global CONF
+        CONF = load_config()
+        self.fm_load()
+
     def fm_click_item(self, name):
         if self.ctrl_pressed:
             # Ctrl+Click = Toggle selection
@@ -914,24 +1160,24 @@ class XtremeADB(ctk.CTk):
         else:
             # Normal click = Single selection
             self.fm_selected = [name]
-        
+
         self.fm_sel = name
-        
+
         # Update highlights
         for btn, item_name in self.file_buttons:
             if item_name in self.fm_selected:
                 btn.configure(fg_color=C["bg_hover"])
             else:
                 btn.configure(fg_color="transparent")
-        
+
         if len(self.fm_selected) > 0:
             self.fm_console.log(f"{len(self.fm_selected)} item(s) selected")
-                
+
     def show_file_context_menu(self, event, name):
         import tkinter as tk
-        
+
         menu = tk.Menu(self, tearoff=0)
-        
+
         if len(self.fm_selected) > 1:
             # Multi-select menu
             menu.add_command(label=f"Delete {len(self.fm_selected)} items", command=self.fm_del_multiple)
@@ -939,16 +1185,16 @@ class XtremeADB(ctk.CTk):
         else:
             # Single item menu - works for BOTH files AND folders now
             menu.add_command(label="Download (Receive)", command=lambda: self.fm_download_single(name))
-            
+
             if name.endswith("/"):
                 menu.add_separator()
                 menu.add_command(label="Upload (Send)", command=lambda: self.fm_upload_to(name))
-            
+
             menu.add_separator()
             menu.add_command(label="Delete", command=lambda: self.fm_del_single(name))
-        
+
         menu.post(event.x_root, event.y_root)
-        
+
     def fm_ent_dir(self, x):
         self.cur_path = (self.cur_path.rstrip("/") + "/" + x).replace("\\", "/")
         self.fm_ent.delete(0, "end")
@@ -974,7 +1220,7 @@ class XtremeADB(ctk.CTk):
         if self.fm_sel and messagebox.askyesno("Confirm", f"Delete {self.fm_sel}?"):
             self.adb_cmd_console(["shell", "rm", "-rf", f'"{self.cur_path.rstrip("/")}/{self.fm_sel}"'])
             self.after(500, self.fm_load)
-            
+
     def fm_del_multiple(self):
         if not self.fm_selected:
             return
@@ -1013,7 +1259,7 @@ class XtremeADB(ctk.CTk):
             self.fm_console.log(f"Downloading {name}...")
             # Use pull with recursive flag for folders
             self.bk.run_live([ADB_PATH, "-s", cln, "pull", src, d], lambda l: self.fm_console.log(l))
-            
+
     def fm_download_multiple(self):
         if not self.fm_selected:
             return
@@ -1057,9 +1303,9 @@ class XtremeADB(ctk.CTk):
         # Input box
         input_frame = ctk.CTkFrame(terminal_container, fg_color="transparent")
         input_frame.pack(fill="x", padx=10, pady=(0, 10))
-        
+
         ctk.CTkLabel(input_frame, text="$", font=("Consolas", 14, "bold"), text_color=C["success"]).pack(side="left", padx=(5, 5))
-        
+
         self.shell_input = ctk.CTkEntry(
             input_frame,
             font=("Consolas", 12),
@@ -1072,9 +1318,9 @@ class XtremeADB(ctk.CTk):
         self.shell_input.focus()
 
         ctk.CTkButton(
-            input_frame, 
-            text="Run", 
-            width=60, 
+            input_frame,
+            text="Run",
+            width=60,
             fg_color=C["primary"],
             command=lambda: self.execute_shell_command(None)
         ).pack(side="right")
@@ -1088,9 +1334,9 @@ class XtremeADB(ctk.CTk):
         """Start background shell process"""
         if not self.sel_dev:
             return
-        
+
         clean = self.sel_dev.split()[0]
-        
+
         try:
             # Start interactive shell with unbuffered output
             self.shell_proc = subprocess.Popen(
@@ -1101,7 +1347,7 @@ class XtremeADB(ctk.CTk):
                 text=True,
                 bufsize=0
             )
-            
+
             self.after(0, lambda: self.append_shell_output("Shell connected. Type commands below.\n"))
         except Exception as e:
             self.after(0, lambda: self.append_shell_output(f"Error: {e}\n"))
@@ -1119,42 +1365,42 @@ class XtremeADB(ctk.CTk):
 
     def execute_shell_command(self, event):
         cmd = self.shell_input.get().strip()
-        
+
         if not cmd:
             return "break" if event else None
-        
+
         # Clear input
         self.shell_input.delete(0, "end")
-        
+
         # Show command in output
         self.append_shell_output(f"$ {cmd}\n")
-        
+
         if cmd == "clear":
             self.clear_terminal()
             return "break" if event else None
-        
+
         if cmd == "exit":
             if self.shell_proc:
                 self.shell_proc.terminate()
                 self.shell_proc = None
             self.append_shell_output("Shell closed.\n")
             return "break" if event else None
-        
+
         if not self.shell_proc or self.shell_proc.poll() is not None:
             self.append_shell_output("[ERROR] Shell not connected\n")
             return "break" if event else None
-        
+
         def _run():
             try:
                 # Send command
                 self.shell_proc.stdin.write(f"{cmd}\n")
                 self.shell_proc.stdin.flush()
-                
+
                 # Send end marker
                 marker = f"__END_CMD_{time.time()}__"
                 self.shell_proc.stdin.write(f"echo '{marker}'\n")
                 self.shell_proc.stdin.flush()
-                
+
                 # Read until marker
                 output_lines = []
                 while True:
@@ -1162,15 +1408,15 @@ class XtremeADB(ctk.CTk):
                     if not line or marker in line:
                         break
                     output_lines.append(line)
-                
+
                 # Show output
                 output = ''.join(output_lines)
                 if output.strip():
                     self.after(0, lambda: self.append_shell_output(output))
-                
+
             except Exception as e:
                 self.after(0, lambda: self.append_shell_output(f"Error: {e}\n"))
-        
+
         self.run_bg(_run)
         return "break" if event else None
 
@@ -1198,9 +1444,14 @@ class XtremeADB(ctk.CTk):
         clean = self.sel_dev.split()[0]
         def _loop():
             # Using Popen to stream
-            proc = subprocess.Popen([ADB_PATH, "-s", clean, "logcat", "-v", "time"], 
-                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
-                                    startupinfo=subprocess.STARTUPINFO() if os.name=="nt" else None)
+            _si = {}
+            if os.name == "nt":
+                _startupinfo = subprocess.STARTUPINFO()
+                _startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                _si["startupinfo"] = _startupinfo
+            proc = subprocess.Popen([ADB_PATH, "-s", clean, "logcat", "-v", "time"],
+                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                    text=True, encoding="utf-8", errors="replace", **_si)
             while self.log_proc:
                 line = proc.stdout.readline()
                 if line: self.logcat_console.log(line.strip())
@@ -1226,17 +1477,69 @@ class XtremeADB(ctk.CTk):
     def view_fastboot(self):
         self.clear()
         self.highlight("Fastboot")
-        ctk.CTkLabel(self.main, text="Fastboot Tools", font=("Segoe UI", 36, "bold"), text_color=C["text_main"]).pack(anchor="w", pady=(10, 20))
-        
+        ctk.CTkLabel(self.main, text="Fastboot Tools", font=("Segoe UI", 36, "bold"), text_color=C["text_main"]).pack(
+            anchor="w", pady=(10, 20))
+
         warn = ctk.CTkFrame(self.main, fg_color="#4a1010", corner_radius=10, border_width=1, border_color=C["danger"])
         warn.pack(fill="x", pady=(0, 20))
         ctk.CTkLabel(warn, text="⚠️ ADVANCED: Use with caution.", text_color="#FF9999").pack(pady=10)
-        
-        self.fb_card("Bootloader", [("Check Info", C["primary"], ["getvar", "all"]), ("Unlock OEM", C["danger"], ["oem", "unlock"])])
-        self.fb_card("Flashing", [("Flash Recovery", C["warning"], None, lambda: self.fb_flash("recovery")),
-                                  ("Flash Boot", C["warning"], None, lambda: self.fb_flash("boot")),
-                                  ("Flash Vbmeta", C["warning"], None, lambda: self.fb_flash("vbmeta"))])
-        
+
+        self.fb_card("Bootloader",
+                     [("Check Info", C["primary"], ["getvar", "all"]), ("Unlock OEM", C["danger"], ["oem", "unlock"])])
+
+        # --- Custom Flash Card ---
+        flash_card = ctk.CTkFrame(self.main, fg_color=C["bg_surface"], corner_radius=10)
+        flash_card.pack(fill="x", pady=10, ipady=10)
+        ctk.CTkLabel(flash_card, text="Flash Partition", font=("Segoe UI", 16, "bold"), text_color=C["text_main"]).pack(
+            anchor="w", padx=20, pady=(10, 5))
+
+        # Partition selection mode
+        self._fb_part_mode = ctk.StringVar(value="select")
+        mode_row = ctk.CTkFrame(flash_card, fg_color="transparent")
+        mode_row.pack(fill="x", padx=20, pady=(0, 5))
+        ctk.CTkRadioButton(mode_row, text="Select partition", variable=self._fb_part_mode, value="select",
+                           command=self._fb_toggle_part_mode, text_color=C["text_main"]).pack(side="left", padx=(0, 20))
+        ctk.CTkRadioButton(mode_row, text="Write partition name", variable=self._fb_part_mode, value="write",
+                           command=self._fb_toggle_part_mode, text_color=C["text_main"]).pack(side="left")
+
+        # Preset partition dropdown
+        self._fb_part_select_frame = ctk.CTkFrame(flash_card, fg_color="transparent")
+        self._fb_part_select_frame.pack(fill="x", padx=20, pady=2)
+        self._fb_part_dropdown = ctk.CTkOptionMenu(
+            self._fb_part_select_frame,
+            values=["boot", "recovery", "vbmeta", "system", "vendor", "dtbo", "super", "userdata"],
+            fg_color=C["input_bg"], text_color=C["text_main"], width=200
+        )
+        self._fb_part_dropdown.pack(side="left")
+
+        # Manual partition entry
+        self._fb_part_write_frame = ctk.CTkFrame(flash_card, fg_color="transparent")
+        self._fb_part_entry = ctk.CTkEntry(
+            self._fb_part_write_frame,
+            placeholder_text="Write the partition name WITHOUT A/B",
+            fg_color=C["input_bg"], border_width=0, text_color=C["text_main"], width=280
+        )
+        self._fb_part_entry.pack(side="left")
+        # starts hidden
+        self._fb_part_write_frame.pack_forget()
+
+        # A/B slot selection
+        ab_row = ctk.CTkFrame(flash_card, fg_color="transparent")
+        ab_row.pack(fill="x", padx=20, pady=(8, 5))
+        ctk.CTkLabel(ab_row, text="Slot:", text_color=C["text_sub"], font=("Segoe UI", 12)).pack(side="left",
+                                                                                                 padx=(0, 10))
+        self._fb_slot = ctk.StringVar(value="none")
+        ctk.CTkRadioButton(ab_row, text="No slot (non-A/B)", variable=self._fb_slot, value="none",
+                           text_color=C["text_main"]).pack(side="left", padx=(0, 15))
+        ctk.CTkRadioButton(ab_row, text="_a", variable=self._fb_slot, value="_a",
+                           text_color=C["text_main"]).pack(side="left", padx=(0, 15))
+        ctk.CTkRadioButton(ab_row, text="_b", variable=self._fb_slot, value="_b",
+                           text_color=C["text_main"]).pack(side="left")
+
+        # Flash button
+        ctk.CTkButton(flash_card, text="Choose .img and Flash", fg_color=C["warning"],
+                      height=40, command=self.fb_flash_custom).pack(padx=20, pady=(10, 15), anchor="w")
+
         self.fb_console = LogConsole(self.main, height=200)
         self.fb_console.pack(fill="x", pady=20)
 
@@ -1253,11 +1556,34 @@ class XtremeADB(ctk.CTk):
         if not self.sel_dev: return
         clean = self.sel_dev.split()[0]
         self.fb_console.log(f"Fastboot: {' '.join(cmd)}")
-        self.bk.run_live([FASTBOOT_PATH, "-s", clean] + cmd, lambda l: self.fb_console.log(l))
 
-    def fb_flash(self, partition):
-        f = filedialog.askopenfilename(filetypes=[("IMG", "*.img")])
-        if f and messagebox.askyesno("Confirm", f"Flash {partition}?"):
+        def _run():
+            self.bk.run_live([FASTBOOT_PATH, "-s", clean] + cmd, lambda l: self.fb_console.log(l))
+
+        self.run_bg(_run)
+
+    def _fb_toggle_part_mode(self):
+        if self._fb_part_mode.get() == "select":
+            self._fb_part_write_frame.pack_forget()
+            self._fb_part_select_frame.pack(fill="x", padx=20, pady=2)
+        else:
+            self._fb_part_select_frame.pack_forget()
+            self._fb_part_write_frame.pack(fill="x", padx=20, pady=2)
+
+    def fb_flash_custom(self):
+        if self._fb_part_mode.get() == "select":
+            base_partition = self._fb_part_dropdown.get()
+        else:
+            base_partition = self._fb_part_entry.get().strip()
+            if not base_partition:
+                CTkMessagebox(title="Error", message="Please enter a partition name.", icon="warning")
+                return
+
+        slot = self._fb_slot.get()
+        partition = base_partition + ("" if slot == "none" else slot)
+
+        f = filedialog.askopenfilename(filetypes=[("IMG files", "*.img")])
+        if f and messagebox.askyesno("Confirm Flash", f"Flash '{partition}' with:\n{f}\n\nAre you sure?"):
             self.fb_run(["flash", partition, f])
 
     # --- WIRELESS ---
@@ -1265,62 +1591,97 @@ class XtremeADB(ctk.CTk):
         self.clear()
         self.highlight("Wireless")
         ctk.CTkLabel(self.main, text="Wireless ADB", font=("Segoe UI", 36, "bold"), text_color=C["text_main"]).pack(anchor="w", pady=(10, 20))
-        
+
+        # Step 1 - TCP/IP
         c1 = ctk.CTkFrame(self.main, fg_color=C["bg_surface"], corner_radius=15)
         c1.pack(fill="x", pady=10)
         ctk.CTkLabel(c1, text="1. Enable TCP/IP Mode", font=("Segoe UI", 14, "bold")).pack(side="left", padx=20, pady=20)
         ctk.CTkButton(c1, text="Enable (5555)", fg_color=C["primary"], command=lambda: self.adb_cmd_console(["tcpip", "5555"])).pack(side="right", padx=20)
-        
+
+        # Step 2 - Pair (Android 11+)
+        c_pair = ctk.CTkFrame(self.main, fg_color=C["bg_surface"], corner_radius=15)
+        c_pair.pack(fill="x", pady=10)
+        ctk.CTkLabel(c_pair, text="2. Pair Device (Android 11+)", font=("Segoe UI", 14, "bold")).pack(anchor="w", padx=20, pady=(20, 5))
+        ctk.CTkLabel(c_pair, text="Go to Developer Options → Wireless debugging → Pair with pairing code",
+                     font=("Segoe UI", 11), text_color=C["text_sub"]).pack(anchor="w", padx=20, pady=(0, 8))
+        r_pair = ctk.CTkFrame(c_pair, fg_color="transparent")
+        r_pair.pack(fill="x", padx=20, pady=(0, 20))
+        self.ent_pair_ip = ctk.CTkEntry(r_pair, placeholder_text="IP:PAIR_PORT", height=40, fg_color=C["input_bg"], border_width=0, text_color=C["text_main"])
+        self.ent_pair_ip.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        self.ent_pair_code = ctk.CTkEntry(r_pair, placeholder_text="6-digit code", height=40, width=130, fg_color=C["input_bg"], border_width=0, text_color=C["text_main"])
+        self.ent_pair_code.pack(side="left", padx=(0, 10))
+        ctk.CTkButton(r_pair, text="Pair", height=40, fg_color=C["warning"], command=self.do_wireless_pair).pack(side="right")
+
+        # Step 3 - Connect
         c2 = ctk.CTkFrame(self.main, fg_color=C["bg_surface"], corner_radius=15)
         c2.pack(fill="x", pady=10)
-        ctk.CTkLabel(c2, text="2. Connect", font=("Segoe UI", 14, "bold")).pack(anchor="w", padx=20, pady=(20, 5))
+        ctk.CTkLabel(c2, text="3. Connect", font=("Segoe UI", 14, "bold")).pack(anchor="w", padx=20, pady=(20, 5))
         r = ctk.CTkFrame(c2, fg_color="transparent")
         r.pack(fill="x", padx=20, pady=(0, 20))
         self.ent_ip = ctk.CTkEntry(r, placeholder_text="IP:PORT", height=40, fg_color=C["input_bg"], border_width=0, text_color=C["text_main"])
         self.ent_ip.pack(side="left", fill="x", expand=True, padx=(0, 10))
         if CONF.get("last_ip"): self.ent_ip.insert(0, CONF["last_ip"])
         ctk.CTkButton(r, text="Connect", height=40, fg_color=C["success"], command=self.do_wireless_connect).pack(side="right")
-        
+
+        # Step 4 - Disconnect
         c3 = ctk.CTkFrame(self.main, fg_color=C["bg_surface"], corner_radius=15)
         c3.pack(fill="x", pady=10)
-        ctk.CTkLabel(c3, text="3. Disconnect", font=("Segoe UI", 14, "bold")).pack(anchor="w", padx=20, pady=(20, 10))
-        
+        ctk.CTkLabel(c3, text="4. Disconnect", font=("Segoe UI", 14, "bold")).pack(anchor="w", padx=20, pady=(20, 10))
         ctk.CTkButton(c3, text="Disconnect All", height=40, fg_color=C["danger"], command=self.do_wireless_disconnect_all).pack(fill="x", padx=20, pady=(0, 10))
-        
         r_disc = ctk.CTkFrame(c3, fg_color="transparent")
         r_disc.pack(fill="x", padx=20, pady=(0, 20))
-        self.ent_disc_ip = ctk.CTkEntry(r_disc, placeholder_text="IP : PORT", height=40, fg_color=C["input_bg"], border_width=0, text_color=C["text_main"])
+        self.ent_disc_ip = ctk.CTkEntry(r_disc, placeholder_text="IP:PORT", height=40, fg_color=C["input_bg"], border_width=0, text_color=C["text_main"])
         self.ent_disc_ip.pack(side="left", fill="x", expand=True, padx=(0, 10))
         ctk.CTkButton(r_disc, text="Disconnect", height=40, fg_color=C["danger"], command=self.do_wireless_disconnect).pack(side="right")
-        
+
         self.wireless_console = LogConsole(self.main, height=200)
         self.wireless_console.pack(fill="x", pady=20)
 
     def do_wireless_connect(self):
-        ip = self.ent_ip.get()
-        if ip:
-            save_config("last_ip", ip)
-            self.wireless_console.log(f"Connecting to {ip}...")
-            self.bk.run_live([ADB_PATH, "connect", ip], lambda l: self.wireless_console.log(l))
-            
+        ip = self.ent_ip.get().strip()
+        if not ip:
+            self.wireless_console.log("[ERROR] Please enter an IP:PORT.")
+            return
+        save_config("last_ip", ip)
+        self.wireless_console.log(f"Connecting to {ip}...")
+        self._pause_dev_loop = True
+        def _connect():
+            try:
+                result = self.bk.run([ADB_PATH, "connect", ip], timeout=30)
+                self.wireless_console.log(result)
+            finally:
+                self._pause_dev_loop = False
+        self.run_bg(_connect)
+
+    def do_wireless_pair(self):
+        ip = self.ent_pair_ip.get().strip()
+        code = self.ent_pair_code.get().strip()
+        if not ip or not code:
+            self.wireless_console.log("[ERROR] Please enter both IP:PORT and the pairing code.")
+            return
+        self.wireless_console.log(f"Pairing with {ip}...")
+        def _pair():
+            self.bk.run_live([ADB_PATH, "pair", ip, code], lambda l: self.wireless_console.log(l))
+        self.run_bg(_pair)
+
     def do_wireless_disconnect_all(self):
         self.adb_cmd_console(["disconnect"])
-        self.wireless_console.write("All wireless connections disconnected!", "success")
+        self.wireless_console.log("All wireless connections disconnected!")
 
     def do_wireless_disconnect(self):
         target = self.ent_disc_ip.get().strip()
         if not target:
-            self.wireless_console.write("Error: Please enter an IP:PORT to disconnect from!", "error")
+            self.wireless_console.log("[ERROR] Please enter an IP:PORT to disconnect from!")
             return
         self.adb_cmd_console(["disconnect", target])
-        self.wireless_console.write(f"Disconnecting from {target}...", "info")
+        self.wireless_console.log(f"Disconnecting from {target}...")
 
     # --- TWEAKS ---
     def view_tweaks(self):
         self.clear()
         self.highlight("Tweaks")
         ctk.CTkLabel(self.main, text="System Tweaks", font=("Segoe UI", 36, "bold"), text_color=C["text_main"]).pack(anchor="w", pady=(10, 20))
-        
+
         scroll = ctk.CTkScrollableFrame(self.main, fg_color="transparent")
         scroll.pack(fill="both", expand=True)
 
@@ -1367,7 +1728,7 @@ class XtremeADB(ctk.CTk):
         self.clear()
         self.highlight("Backup")
         ctk.CTkLabel(self.main, text="Backup & Restore", font=("Segoe UI", 36, "bold"), text_color=C["text_main"]).pack(anchor="w", pady=(10, 20))
-        
+
         grid = ctk.CTkFrame(self.main, fg_color="transparent")
         grid.pack(fill="x", padx=30)
         b_card = ctk.CTkFrame(grid, fg_color=C["bg_surface"], corner_radius=15)
@@ -1379,7 +1740,7 @@ class XtremeADB(ctk.CTk):
         r_card.pack(side="left", fill="both", expand=True, padx=(10, 0))
         ctk.CTkLabel(r_card, text="Restore Device", font=("Segoe UI", 18, "bold")).pack(pady=20)
         ctk.CTkButton(r_card, text="Start Restore", height=50, fg_color=C["warning"], command=self.do_restore).pack(pady=20, padx=20)
-        
+
         self.backup_console = LogConsole(self.main, height=200)
         self.backup_console.pack(fill="x", pady=20)
 
@@ -1390,6 +1751,77 @@ class XtremeADB(ctk.CTk):
     def do_restore(self):
         f = filedialog.askopenfilename(filetypes=[("Backup", "*.ab")])
         if f: self.adb_cmd_console(["restore", f], "Restore Started - Check Device")
+
+    # --- DEVICES ---
+    def view_devices(self):
+        self.clear()
+        self.highlight("Devices")
+        ctk.CTkLabel(self.main, text="Device Manager", font=("Segoe UI", 36, "bold"), text_color=C["text_main"]).pack(anchor="w", pady=(10, 20))
+
+        info_card = ctk.CTkFrame(self.main, fg_color=C["bg_surface"], corner_radius=15)
+        info_card.pack(fill="x", pady=(0, 15))
+        ctk.CTkLabel(info_card, text="Active Device", font=("Segoe UI", 14, "bold"), text_color=C["text_main"]).pack(anchor="w", padx=20, pady=(15, 5))
+        self.dev_active_lbl = ctk.CTkLabel(info_card, text=self.sel_dev or "None",
+                                           font=("Segoe UI", 13), text_color=C["primary"])
+        self.dev_active_lbl.pack(anchor="w", padx=20, pady=(0, 15))
+
+        list_card = ctk.CTkFrame(self.main, fg_color=C["bg_surface"], corner_radius=15)
+        list_card.pack(fill="x", pady=(0, 15))
+        top = ctk.CTkFrame(list_card, fg_color="transparent")
+        top.pack(fill="x", padx=20, pady=(15, 10))
+        ctk.CTkLabel(top, text="Connected Devices", font=("Segoe UI", 14, "bold"), text_color=C["text_main"]).pack(side="left")
+        ctk.CTkButton(top, text="↻", width=32, height=32, font=("Segoe UI", 18),
+                      fg_color="transparent", hover_color=C["bg_hover"],
+                      text_color=C["text_sub"], command=self._refresh_device_list).pack(side="right", padx=(0, 5))
+
+        self.dev_list_frame = ctk.CTkScrollableFrame(list_card, fg_color="transparent", height=200)
+        self.dev_list_frame.pack(fill="x", padx=20, pady=(0, 15))
+        self._refresh_device_list()
+
+        self.dev_console = LogConsole(self.main, height=150)
+        self.dev_console.pack(fill="x", pady=10)
+
+    def _refresh_device_list(self):
+        for w in self.dev_list_frame.winfo_children():
+            w.destroy()
+
+        devices = self.bk.get_devices()
+        if not devices:
+            ctk.CTkLabel(self.dev_list_frame, text="No devices found.",
+                         text_color=C["text_sub"], font=("Segoe UI", 12)).pack(pady=10)
+            return
+
+        for dev in devices:
+            is_selected = dev == self.sel_dev
+            serial = dev.split()[0]
+            mode = dev.split("(")[1].replace(")", "") if "(" in dev else ""
+            if "ADB" in mode:
+                model = self.bk.run([ADB_PATH, "-s", serial, "shell", "getprop", "ro.product.model"]).strip()
+                label_text = f"  ●  {model or serial}  [{serial}]  ({mode})"
+            else:
+                label_text = f"  ●  {serial}  ({mode})"
+
+            row = ctk.CTkButton(
+                self.dev_list_frame,
+                text=label_text,
+                anchor="w",
+                font=("Segoe UI", 12),
+                fg_color=C["bg_hover"] if is_selected else "transparent",
+                hover_color=C["bg_hover"],
+                text_color=C["success"] if is_selected else C["text_main"],
+                command=lambda d=dev: self._select_device(d)
+            )
+            row.pack(fill="x", pady=2)
+
+    def _select_device(self, dev):
+        self.sel_dev = dev
+        if hasattr(self, 'dev_active_lbl') and self.dev_active_lbl.winfo_exists():
+            self.dev_active_lbl.configure(text=dev)
+        self.status_lbl.configure(text=dev.split()[0])
+        self.status_dot.configure(text_color=C["success"])
+        self._refresh_device_list()
+        if hasattr(self, 'dev_console'):
+            self.dev_console.log(f"Switched to {dev}")
 
     # --- SETTINGS ---
     def view_settings(self):
@@ -1415,6 +1847,22 @@ class XtremeADB(ctk.CTk):
         c2 = ctk.CTkFrame(self.main, fg_color=C["bg_surface"], corner_radius=15)
         c2.pack(fill="x", padx=30, pady=10)
         ctk.CTkLabel(c2, text="Advanced", font=("Segoe UI", 16, "bold")).pack(anchor="w", padx=20, pady=(20, 10))
+
+        # ADB Path picker
+        adb_row = ctk.CTkFrame(c2, fg_color="transparent")
+        adb_row.pack(fill="x", padx=20, pady=(0, 10))
+        ctk.CTkLabel(adb_row, text="ADB Executable Path", text_color=C["text_main"], font=("Segoe UI", 13)).pack(
+            side="left", padx=20)
+        self.ent_adb_path = ctk.CTkEntry(adb_row,
+                                         placeholder_text="e.g. location_to\\adb leave blank for system PATH",
+                                         fg_color=C["input_bg"], border_width=0, text_color=C["text_main"], width=320)
+        self.ent_adb_path.pack(side="left", padx=(0, 10))
+        if CONF.get("adb_path", ""):
+            self.ent_adb_path.insert(0, CONF["adb_path"])
+        ctk.CTkButton(adb_row, text="Browse", width=80, fg_color=C["primary"],
+                      command=self._browse_adb_path).pack(side="left", padx=(0, 10))
+        ctk.CTkButton(adb_row, text="Save", width=70, fg_color=C["success"],
+                      command=self._save_adb_path).pack(side="left")
 
         su_row = ctk.CTkFrame(c2, fg_color="transparent")
         su_row.pack(fill="x", padx=20, pady=(0, 10))
@@ -1458,6 +1906,24 @@ class XtremeADB(ctk.CTk):
         self.refresh_slider.set(CONF.get("refresh_interval", 3))
         self.refresh_slider.pack(side="right", padx=20, fill="x", expand=True)
 
+        poll_row = ctk.CTkFrame(c2, fg_color="transparent")
+        poll_row.pack(fill="x", padx=20, pady=(0, 20))
+        ctk.CTkLabel(poll_row, text="Device Poll Interval", text_color=C["text_main"],
+                     font=("Segoe UI", 13)).pack(side="left", padx=20)
+
+        self.poll_label = ctk.CTkLabel(poll_row, text=f"{CONF.get('device_poll_interval', 2)}s",
+                                       text_color=C["primary"], font=("Segoe UI", 13, "bold"))
+        self.poll_label.pack(side="right", padx=(0, 10))
+
+        self.poll_slider = ctk.CTkSlider(
+            poll_row, from_=1, to=10, number_of_steps=9,
+            command=self._update_poll_interval,
+            fg_color="#555555", progress_color=C["primary"],
+            button_color=C["primary"], button_hover_color=C["success"]
+        )
+        self.poll_slider.set(CONF.get("device_poll_interval", 2))
+        self.poll_slider.pack(side="right", padx=20, fill="x", expand=True)
+
     def update_refresh_interval(self, value):
         global CONF
         interval = int(value)
@@ -1465,12 +1931,35 @@ class XtremeADB(ctk.CTk):
         save_config("refresh_interval", interval)
         CONF = load_config()
 
+    def _update_poll_interval(self, value):
+        global CONF
+        interval = int(value)
+        self.poll_label.configure(text=f"{interval}s")
+        save_config("device_poll_interval", interval)
+        CONF = load_config()
+
     def toggle_su(self):
         global CONF
         enabled = self.su_switch.get() == 1
         save_config("use_su", enabled)
         CONF = load_config()
-    
+
+    def _browse_adb_path(self):
+        if os.name == "nt":
+            f = filedialog.askopenfilename(filetypes=[("ADB Executable", "adb.exe"), ("All files", "*.*")])
+        else:
+            f = filedialog.askopenfilename(title="Select ADB executable")
+        if f:
+            self.ent_adb_path.delete(0, "end")
+            self.ent_adb_path.insert(0, f)
+
+    def _save_adb_path(self):
+        global ADB_PATH
+        path = self.ent_adb_path.get().strip()
+        ADB_PATH = path if path else "adb"
+        save_config("adb_path", path)
+        CTkMessagebox(title="Saved", message=f"ADB path updated!\nNow using: {ADB_PATH}", icon="check", option_1="Ok")
+
 if __name__ == "__main__":
     app = XtremeADB()
     app.mainloop()
