@@ -1,12 +1,10 @@
 name: Build XtremeADB macOS
-
 on:
   workflow_dispatch:
 
 jobs:
   build-macos:
     runs-on: macos-latest
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
@@ -45,12 +43,9 @@ jobs:
           --python-flag=no_warnings \
           --lto=yes \
           --enable-plugin=tk-inter \
+          --include-data-file=splash.png=splash.png \
+          --include-data-file=xadb.png=xadb.png \
           xadb.py
-
-      - name: Copy assets into app bundle
-        run: |
-          cp splash.png xadb.app/Contents/MacOS/
-          cp xadb.png xadb.app/Contents/MacOS/
 
       - name: Rename DMG
         run: mv xadb.dmg xadb_mac_v${{ steps.version.outputs.VER }}.dmg
