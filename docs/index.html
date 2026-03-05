@@ -362,10 +362,9 @@ function renderButtons(version, id) {
   const el = document.getElementById(id);
   if (!el) return;
   el.innerHTML = PLATFORMS.map(p => {
-    // Replaced ${v} with ${version} here
     const filename = p.ext ? `xadb_${p.cls}_v${version}.${p.ext}` : `xadb_${p.cls}_v${version}`;
     return `<a class="dl-btn ${p.cls}"
-        href="https://github.com/KPR-MAN/XtremeADB/releases/download/Release%20v${version}/${filename}"
+        href="https://github.com/KPR-MAN/XtremeADB/releases/download/Release%20v${version}.0/${filename}" 
         target="_blank">
       ${p.icon}
       <div class="dl-info">${p.label}<small>${p.sub}</small></div>
@@ -390,7 +389,7 @@ async function loadVersion() {
     const ver = d.version;
     document.getElementById('ver-badge').textContent = `Latest release: v${ver}`;
     const vt = document.getElementById('ver-tag');
-    if (vt) vt.textContent = `v${ver}`; // cleanVer call removed here
+    if (vt) vt.textContent = `v${ver}`;
     renderButtons(ver, 'dl-hero');
   } catch(e) {
     document.getElementById('ver-badge').textContent = 'See GitHub for latest';
