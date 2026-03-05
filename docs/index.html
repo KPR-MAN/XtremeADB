@@ -364,7 +364,7 @@ function renderButtons(version, id) {
   el.innerHTML = PLATFORMS.map(p => {
     const filename = p.ext ? `xadb_${p.cls}_v${version}.${p.ext}` : `xadb_${p.cls}_v${version}`;
     return `<a class="dl-btn ${p.cls}"
-        href="https://github.com/KPR-MAN/XtremeADB/releases/download/Release%20v${version}.0/${filename}" 
+        href="https://github.com/KPR-MAN/XtremeADB/releases/download/Release_v${version}.0/${filename}"
         target="_blank">
       ${p.icon}
       <div class="dl-info">${p.label}<small>${p.sub}</small></div>
