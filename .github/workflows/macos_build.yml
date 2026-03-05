@@ -26,6 +26,9 @@ jobs:
         id: version
         run: echo "VER=$(python -c "import json; print(json.load(open('version.json'))['version'])")" >> $GITHUB_OUTPUT
 
+      - name: Install create-dmg
+        run: brew install create-dmg
+
       - name: Build with Nuitka
         run: |
           python -m nuitka --mode=app \
