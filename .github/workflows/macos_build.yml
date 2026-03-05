@@ -27,11 +27,10 @@ jobs:
       - name: Install create-dmg
         run: brew install create-dmg
 
-      - name: Build with Nuitka
+      - name: Build App with Nuitka
         run: |
           python -m nuitka --mode=app \
           --macos-app-icon=xadb.png \
-          --macos-app-create-dmg \
           --company-name="KPR-MAN" \
           --product-name="Xtreme ADB" \
           --file-version=${{ steps.version.outputs.VER }}.0.0 \
@@ -47,8 +46,30 @@ jobs:
           --include-data-file=xadb.png=xadb.png \
           xadb.py
 
-      - name: Rename DMG
-        run: mv xadb.dmg xadb_mac_v${{ steps.version.outputs.VER }}.dmg
+      - name: Check App Size
+        run: |
+          if [ -d "xadb.app" ]; then
+            echo "App exists. Checking size:"
+            du -sh xadb.app
+          else
+            echo "Error: xadb.app was not created!"
+            exit 1
+          fi
+
+      - name: Create DMG
+        run: |
+          test -f xadb_mac_v${{ steps.version.outputs.VER }}.dmg && rm xadb_mac_v${{ steps.version.outputs.VER }}.dmg
+          create-dmg \
+            --volname "Xtreme ADB" \
+            --volicon "xadb.png" \
+            --window-pos 200 120 \
+            --window-size 800 400 \
+            --icon-size 100 \
+            --icon "Xtreme ADB.app" 200 190 \
+            --hide-extension "Xtreme ADB.app" \
+            --app-drop-link 600 185 \
+            "xadb_mac_v${{ steps.version.outputs.VER }}.dmg" \
+            "xadb.app"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
