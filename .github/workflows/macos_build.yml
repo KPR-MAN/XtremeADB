@@ -46,19 +46,15 @@ jobs:
           --include-data-file=xadb.png=xadb.png \
           xadb.py
 
-      - name: Check App Size
-        run: |
-          if [ -d "xadb.app" ]; then
-            echo "App exists. Checking size:"
-            du -sh xadb.app
-          else
-            echo "Error: xadb.app was not created!"
-            exit 1
-          fi
-
       - name: Create DMG
         run: |
-          test -f xadb_mac_v${{ steps.version.outputs.VER }}.dmg && rm xadb_mac_v${{ steps.version.outputs.VER }}.dmg
+          # Rename the artifact to match the Product Name
+          mv xadb.app "Xtreme ADB.app"
+
+          # Remove old dmg if exists
+          rm -f "xadb_mac_v${{ steps.version.outputs.VER }}.dmg"
+
+          # Create DMG
           create-dmg \
             --volname "Xtreme ADB" \
             --volicon "xadb.png" \
@@ -69,7 +65,7 @@ jobs:
             --hide-extension "Xtreme ADB.app" \
             --app-drop-link 600 185 \
             "xadb_mac_v${{ steps.version.outputs.VER }}.dmg" \
-            "xadb.app"
+            "Xtreme ADB.app" 
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
