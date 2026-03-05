@@ -1,9 +1,12 @@
 name: Build XtremeADB macOS
+
 on:
   workflow_dispatch:
+
 jobs:
   build-macos:
     runs-on: macos-latest
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
@@ -19,14 +22,19 @@ jobs:
           pip install -r requirements.txt
           pip install nuitka pillow zstandard imageio
 
+      - name: Get version
+        id: version
+        run: echo "VER=$(python -c "import json; print(json.load(open('version.json'))['version'])")" >> $GITHUB_OUTPUT
+
       - name: Build with Nuitka
         run: |
           python -m nuitka --mode=app \
           --macos-app-icon=xadb.png \
+          --macos-app-create-dmg \
           --company-name="KPR-MAN" \
           --product-name="Xtreme ADB" \
-          --file-version=1.3.0.0 \
-          --product-version=1.3.0.0 \
+          --file-version=${{ steps.version.outputs.VER }}.0.0 \
+          --product-version=${{ steps.version.outputs.VER }}.0.0 \
           --file-description="Xtreme ADB" \
           --remove-output \
           --python-flag=no_docstrings \
@@ -36,12 +44,18 @@ jobs:
           --enable-plugin=tk-inter \
           xadb.py
 
-      - name: Package as ZIP
+      - name: Copy assets into app bundle
         run: |
-          zip -r XtremeADB-macos.zip xadb.app/
+          cp splash.png xadb.app/Contents/MacOS/
+          cp xadb.png xadb.app/Contents/MacOS/
 
-      - name: Upload ZIP artifact
-        uses: actions/upload-artifact@v4
+      - name: Rename DMG to match release naming
+        run: mv xadb.dmg xadb_mac_v${{ steps.version.outputs.VER }}.dmg
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v1
         with:
-          name: XtremeADB-macos
-          path: XtremeADB-macos.zip
+          tag_name: Release v${{ steps.version.outputs.VER }}
+          files: xadb_mac_v${{ steps.version.outputs.VER }}.dmg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
