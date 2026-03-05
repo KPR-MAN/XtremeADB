@@ -10,7 +10,7 @@ SetCompressorDictSize 64
 ; GENERAL SETTINGS
 ; ==========================================
 Name "Xtreme ADB"
-OutFile "xadb_windows_installer_v1.3.exe"
+OutFile "xadb_win_v2.0.exe"
 InstallDir "$PROGRAMFILES\Xtreme ADB"
 InstallDirRegKey HKLM "Software\Xtreme ADB" "Install_Dir"
 RequestExecutionLevel admin
