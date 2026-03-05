@@ -58,10 +58,8 @@ jobs:
       - name: Rename DMG to match release naming
         run: mv xadb.dmg xadb_mac_v${{ steps.version.outputs.VER }}.dmg
 
-      - name: Upload to Release
-        uses: softprops/action-gh-release@v1
+  - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: Release v${{ steps.version.outputs.VER }}
-          files: xadb_mac_v${{ steps.version.outputs.VER }}.dmg
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: xadb_mac_v${{ steps.version.outputs.VER }}
+          path: xadb_mac_v${{ steps.version.outputs.VER }}.dmg
