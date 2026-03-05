@@ -3,6 +3,9 @@ name: Build XtremeADB macOS
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-macos:
     runs-on: macos-latest
