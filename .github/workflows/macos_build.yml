@@ -4,7 +4,7 @@ on:
 
 jobs:
   build-macos:
-    runs-on: macos-latest
+    runs-on: macos-13
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
