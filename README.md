@@ -62,7 +62,7 @@ Xtreme ADB is An App That Helps You To Use Android debuging bridge easier By Usi
 **You can download latest release executable instead of the python script Or:**
 1.  Open your terminal/command prompt.
 2.  Clone this repo: `git clone https://github.com/KPR-MAN/XtremeADB`
-3.  Install the required libraries: `pip install -r requirments.txt`
+3.  Install the required libraries: `pip install -r requirements.txt`
 4.  Run the tool: `python xadb.py`
 
 ---
