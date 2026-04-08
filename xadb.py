@@ -8,7 +8,7 @@ import json
 import datetime
 import sys
 import requests
-import json
+import queue
 from packaging import version
 from tkinter import filedialog, messagebox, Canvas
 from PIL import Image, ImageTk
@@ -44,9 +44,9 @@ class SplashScreen:
 # ==========================================
 # 1. CORE CONFIGURATION
 # ==========================================
-APP_NAME = "Xtreme ADB V2.0"
-LOG_FILE = "xtreme_log.txt"
-CURRENT_VERSION = "2.0"
+APP_NAME = "Xtreme ADB V2.1"
+LOG_FILE = None
+CURRENT_VERSION = "2.1"
 UPDATE_URL = "https://raw.githubusercontent.com/KPR-MAN/XtremeADB/main/version.json"
 
 DEFAULT_CONFIG = {
@@ -65,9 +65,13 @@ DEFAULT_CONFIG = {
 
 if os.name == 'nt':
     CONFIG_FILE = Path(os.getenv('APPDATA')) / "XtremeADB" / "xtreme_config.json"
-    CONFIG_FILE.parent.mkdir(exist_ok=True)
+elif sys.platform == 'darwin':
+    CONFIG_FILE = Path.home() / "Library" / "Application Support" / "XtremeADB" / "xtreme_config.json"
 else:
-    CONFIG_FILE = Path("xtreme_config.json")
+    CONFIG_FILE = Path.home() / ".config" / "XtremeADB" / "xtreme_config.json"
+
+CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+LOG_FILE = CONFIG_FILE.parent / "xtreme_log.txt"
 
 def load_config():
     if not os.path.exists(CONFIG_FILE):
@@ -143,6 +147,19 @@ C = {
     "term_fg": ("#000000", "#00FF00"),
 }
 
+
+# Cross-platform font fallbacks
+if sys.platform == "darwin":
+    F_UI   = "Helvetica Neue"
+    F_MONO = "Menlo"
+elif os.name == "nt":
+    F_UI   = "Segoe UI"
+    F_MONO = "Consolas"
+else:  # Linux
+    F_UI   = "DejaVu Sans"
+    F_MONO = "DejaVu Sans Mono"
+
+RIGHT_CLICK = "<Button-2>" if sys.platform == "darwin" else "<Button-3>"
 # ==========================================
 # 3. CUSTOM WIDGETS
 # ==========================================
@@ -168,9 +185,9 @@ class RadialProgress(ctk.CTkFrame):
         initial_bg = "#1C1C1C" if ctk.get_appearance_mode() == "Dark" else "#FFFFFF"
         self.canvas = Canvas(self, width=size, height=size, highlightthickness=0, bg=initial_bg)
         self.canvas.pack()
-        self.label = ctk.CTkLabel(self, text="0%", font=("Segoe UI", 18, "bold"), text_color=C["text_main"])
+        self.label = ctk.CTkLabel(self, text="0%", font=(F_UI, 18, "bold"), text_color=C["text_main"])
         self.label.place(relx=0.5, rely=0.4, anchor="center")
-        ctk.CTkLabel(self, text=title, font=("Segoe UI", 12), text_color=C["text_sub"]).pack(pady=5)
+        ctk.CTkLabel(self, text=title, font=(F_UI, 12), text_color=C["text_sub"]).pack(pady=5)
         self.bind("<Configure>", self.update_bg)
         self.draw()
 
@@ -205,14 +222,14 @@ class LogConsole(ctk.CTkFrame):
         # Header
         header = ctk.CTkFrame(self, height=25, fg_color="transparent")
         header.pack(fill="x", padx=5, pady=2)
-        ctk.CTkLabel(header, text="> Terminal Output", font=("Consolas", 11, "bold"), text_color=C["text_sub"]).pack(side="left")
+        ctk.CTkLabel(header, text="> Terminal Output", font=(F_MONO, 11, "bold"), text_color=C["text_sub"]).pack(side="left")
         ctk.CTkButton(header, text="Clear", width=50, height=20, fg_color=C["input_bg"], text_color=C["text_main"],
-                      font=("Segoe UI", 10), command=self.clear).pack(side="right")
+                      font=(F_UI, 10), command=self.clear).pack(side="right")
 
         # Text Area
         self.text_area = ctk.CTkTextbox(
             self,
-            font=("Consolas", 12),
+            font=(F_MONO, 12),
             fg_color=C["term_bg"],
             text_color=C["term_fg"],
             activate_scrollbars=True
@@ -238,12 +255,13 @@ class LogConsole(ctk.CTkFrame):
 class Backend:
     @staticmethod
     def run(cmd, timeout=10):
+        if isinstance(cmd, str):
+            cmd = cmd.split()
         try:
             startupinfo = None
             if os.name == "nt":
                 startupinfo = subprocess.STARTUPINFO()
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-
             res = subprocess.run(
                 cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
                 startupinfo=startupinfo, timeout=timeout
@@ -255,17 +273,17 @@ class Backend:
     @staticmethod
     def run_live(cmd, callback):
         """Run command and stream output to callback function"""
+        if isinstance(cmd, str):
+            cmd = cmd.split()
         try:
             startupinfo = None
             if os.name == "nt":
                 startupinfo = subprocess.STARTUPINFO()
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-
             process = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, encoding="utf-8", errors="replace", startupinfo=startupinfo
             )
-
             for line in iter(process.stdout.readline, ''):
                 if line:
                     callback(line.strip())
@@ -291,7 +309,6 @@ class Backend:
                     devices.append(f"{serial} (RECOVERY)")
                 elif status in ("unauthorized", "offline", "no permissions"):
                     problem_serials.add(serial)
-
             out_fb = self.run([FASTBOOT_PATH, "devices"], timeout=5)
             for line in out_fb.split("\n"):
                 line = line.strip()
@@ -301,10 +318,8 @@ class Backend:
                         devices.append(f"{serial} (FASTBOOT)")
         except:
             pass
-
         if problem_serials:
             self._problem_serials = problem_serials
-            
         return devices
 
     def get_stats(self, device_id):
@@ -387,11 +402,14 @@ class XtremeADB(ctk.CTk):
         self.grid_rowconfigure(0, weight=1)
 
         self.init_ui()
-        splash.destroy() # Stop showing the splash screen
+        splash.destroy()
+        self.deiconify()  # un-withdraw the main window — required on Linux/macOS
         if os.name == "nt":
-            self.after(0, lambda: self.state('zoomed'))  # Windows
+            self.after(0, lambda: self.state('zoomed'))          # Windows
+        elif sys.platform == "darwin":
+            self.after(0, lambda: self.attributes('-zoomed', True))  # macOS
         else:
-            self.after(0, lambda: self.state('normal'))  # Linux / macOS / WSL (Setting as Normal Because There is no Full Screen)
+            self.after(0, lambda: self.attributes('-zoomed', True))  # Linux / WSL
 
         # -------------------------------
         # Set window icon cross-platform
@@ -452,7 +470,7 @@ class XtremeADB(ctk.CTk):
         self.sidebar.grid(row=0, column=0, sticky="nsew")
         self.sidebar.grid_propagate(False)
 
-        ctk.CTkLabel(self.sidebar, text="XA", font=("Segoe UI", 28, "bold"), text_color=C["primary"]).pack(pady=(30, 20))
+        ctk.CTkLabel(self.sidebar, text="XA", font=(F_UI, 28, "bold"), text_color=C["primary"]).pack(pady=(30, 20))
 
         self.nav_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
         self.nav_frame.pack(fill="x", pady=10)
@@ -475,14 +493,14 @@ class XtremeADB(ctk.CTk):
         for icon, name, cmd in items:
             btn = FluentButton(
                 self.nav_frame, text=icon, width=50, height=50, corner_radius=10,
-                font=("Segoe UI", 22), command=cmd, fg_color="transparent", text_color=C["text_sub"]
+                font=(F_UI, 22), command=cmd, fg_color="transparent", text_color=C["text_sub"]
             )
             btn.pack(pady=5, padx=10)
             self.nav_buttons[name] = btn
 
-        self.status_dot = ctk.CTkLabel(self.sidebar, text="●", font=("Arial", 24), text_color=C["danger"])
+        self.status_dot = ctk.CTkLabel(self.sidebar, text="●", font=(F_UI, 24), text_color=C["danger"])
         self.status_dot.pack(side="bottom", pady=(0, 20))
-        self.status_lbl = ctk.CTkLabel(self.sidebar, text="None", font=("Segoe UI", 10), text_color="gray")
+        self.status_lbl = ctk.CTkLabel(self.sidebar, text="None", font=(F_UI, 10), text_color="gray")
         self.status_lbl.pack(side="bottom", pady=(0, 5))
 
         # Main content
@@ -564,10 +582,19 @@ class XtremeADB(ctk.CTk):
                                 self.after(0, lambda d=devices: self.prompt_device_select(d))
                         if devices != self._last_device_list:
                             self.after(0, self._on_device_list_changed)
+                        
                         self._last_device_list = devices
                         sel = self.sel_dev
                         self.after(0, lambda: self.status_dot.configure(text_color=C["success"]))
-                        self.after(0, lambda s=sel: self.status_lbl.configure(text=s.split()[0] if s else "Ready"))
+                        
+                        # --- NEW LOGIC PROPERLY INDENTED ---
+                        if sel:
+                            name = self.bk.run([ADB_PATH, "-s", sel.split()[0], "shell", "settings", "get", "global", "device_name"]).strip()
+                            self.after(0, lambda n=name: self.status_lbl.configure(text=n))
+                        else:
+                            self.after(0, lambda: self.status_lbl.configure(text="Ready"))
+                        # -----------------------------------
+                        
                     else:
                         if self._last_device_list:
                             self.after(0, self._on_device_list_changed)
@@ -605,7 +632,7 @@ class XtremeADB(ctk.CTk):
 
         msg = f"⚠  Multiple devices detected — Please select one in the Devices menu.\nCurrently active: {friendly}"
         ctk.CTkLabel(banner, text=msg, text_color="#FFD966",
-                     font=("Segoe UI", 12), justify="left").pack(side="left", padx=15, pady=10)
+                     font=(F_UI, 12), justify="left").pack(side="left", padx=15, pady=10)
 
         btn_frame = ctk.CTkFrame(banner, fg_color="transparent")
         btn_frame.pack(side="right", padx=10)
@@ -630,7 +657,6 @@ class XtremeADB(ctk.CTk):
                     if hasattr(self, 'rad_batt') and hasattr(self, 'rad_ram'):
                         self.rad_batt.set(stats.get("batt", 0))
                         self.rad_ram.set(stats.get("ram", 0))
-
                     if hasattr(self, 'lbl_model') and hasattr(self, 'lbl_android'):
                         m, a = self.bk.get_device_info(self.sel_dev)
                         self.lbl_model.configure(text=f"Model: {m}")
@@ -649,14 +675,14 @@ class XtremeADB(ctk.CTk):
         self.clear()
         self.highlight("Dashboard")
 
-        ctk.CTkLabel(self.main, text="Dashboard", font=("Segoe UI", 36, "bold"), text_color=C["text_main"]).pack(anchor="w", pady=(10, 10))
+        ctk.CTkLabel(self.main, text="Dashboard", font=(F_UI, 36, "bold"), text_color=C["text_main"]).pack(anchor="w", pady=(10, 10))
 
         # Info Row
         info_frame = ctk.CTkFrame(self.main, fg_color="transparent")
         info_frame.pack(fill="x", pady=(0, 20))
-        self.lbl_model = ctk.CTkLabel(info_frame, text="Model: ...", font=("Segoe UI", 14), text_color=C["text_sub"])
+        self.lbl_model = ctk.CTkLabel(info_frame, text="Model: ...", font=(F_UI, 14), text_color=C["text_sub"])
         self.lbl_model.pack(side="left", padx=10)
-        self.lbl_android = ctk.CTkLabel(info_frame, text="Android: ...", font=("Segoe UI", 14), text_color=C["text_sub"])
+        self.lbl_android = ctk.CTkLabel(info_frame, text="Android: ...", font=(F_UI, 14), text_color=C["text_sub"])
         self.lbl_android.pack(side="left", padx=10)
 
         # Stats row
@@ -675,7 +701,7 @@ class XtremeADB(ctk.CTk):
         self.active_radials.append(self.rad_batt)
 
         # Power controls
-        ctk.CTkLabel(self.main, text="Power Controls", font=("Segoe UI", 18, "bold"), text_color=C["text_main"]).pack(anchor="w", pady=(30, 10))
+        ctk.CTkLabel(self.main, text="Power Controls", font=(F_UI, 18, "bold"), text_color=C["text_main"]).pack(anchor="w", pady=(30, 10))
         pg = ctk.CTkFrame(self.main, fg_color="transparent")
         pg.pack(fill="x")
         btns = [("Reboot System", ["reboot"], C["primary"]), ("Recovery", ["reboot", "recovery"], C["warning"]),
@@ -684,11 +710,11 @@ class XtremeADB(ctk.CTk):
         button_text_color = "#000000" if ctk.get_appearance_mode() == "Light" else "#FFFFFF" ## Fix For Issue 1
 
         for label, cmd, color in btns:
-            ctk.CTkButton(pg, text=label, text_color=button_text_color, fg_color=color, height=50, corner_radius=8, font=("Segoe UI", 14, "bold"),
+            ctk.CTkButton(pg, text=label, text_color=button_text_color, fg_color=color, height=50, corner_radius=8, font=(F_UI, 14, "bold"),
                           command=lambda x=cmd: self.adb_cmd_console(x)).pack(side="left", fill="x", expand=True, padx=5)
 
         # Console
-        ctk.CTkLabel(self.main, text="Activity Log", font=("Segoe UI", 14, "bold"), text_color=C["text_main"]).pack(anchor="w", pady=(20, 5))
+        ctk.CTkLabel(self.main, text="Activity Log", font=(F_UI, 14, "bold"), text_color=C["text_main"]).pack(anchor="w", pady=(20, 5))
         self.dash_console = LogConsole(self.main, height=200)
         self.dash_console.pack(fill="x", pady=(0, 20))
 
@@ -696,7 +722,7 @@ class XtremeADB(ctk.CTk):
     def view_screen(self):
         self.clear()
         self.highlight("Screen")
-        ctk.CTkLabel(self.main, text="Screen Tools", font=("Segoe UI", 36, "bold"), text_color=C["text_main"]).pack(anchor="w", pady=(10, 20))
+        ctk.CTkLabel(self.main, text="Screen Tools", font=(F_UI, 36, "bold"), text_color=C["text_main"]).pack(anchor="w", pady=(10, 20))
 
         grid = ctk.CTkFrame(self.main, fg_color="transparent")
         grid.pack(fill="x", pady=10)
@@ -704,19 +730,19 @@ class XtremeADB(ctk.CTk):
         # Scrcpy
         c1 = ctk.CTkFrame(grid, fg_color=C["bg_surface"], corner_radius=10)
         c1.pack(side="left", fill="both", expand=True, padx=5, ipady=10)
-        ctk.CTkLabel(c1, text="Mirroring", font=("Segoe UI", 16, "bold")).pack(pady=10)
+        ctk.CTkLabel(c1, text="Mirroring", font=(F_UI, 16, "bold")).pack(pady=10)
         ctk.CTkButton(c1, text="Launch Scrcpy", fg_color=C["primary"], command=self.launch_scrcpy).pack(pady=10)
 
         # Screenshot
         c2 = ctk.CTkFrame(grid, fg_color=C["bg_surface"], corner_radius=10)
         c2.pack(side="left", fill="both", expand=True, padx=5, ipady=10)
-        ctk.CTkLabel(c2, text="Capture", font=("Segoe UI", 16, "bold")).pack(pady=10)
+        ctk.CTkLabel(c2, text="Capture", font=(F_UI, 16, "bold")).pack(pady=10)
         ctk.CTkButton(c2, text="Take Screenshot", fg_color=C["success"], command=self.take_screenshot).pack(pady=10)
 
         # Record
         c3 = ctk.CTkFrame(grid, fg_color=C["bg_surface"], corner_radius=10)
         c3.pack(side="left", fill="both", expand=True, padx=5, ipady=10)
-        ctk.CTkLabel(c3, text="Recording", font=("Segoe UI", 16, "bold")).pack(pady=10)
+        ctk.CTkLabel(c3, text="Recording", font=(F_UI, 16, "bold")).pack(pady=10)
         self.rec_btn = ctk.CTkButton(c3, text="Start Record (10s)", fg_color=C["danger"], command=self.record_screen)
         self.rec_btn.pack(pady=10)
 
@@ -798,7 +824,7 @@ class XtremeADB(ctk.CTk):
         self.clear()
         self.highlight("Apps")
         self.sel_pkgs = []
-        ctk.CTkLabel(self.main, text="App Manager", font=("Segoe UI", 36, "bold"), text_color=C["text_main"]).pack(
+        ctk.CTkLabel(self.main, text="App Manager", font=(F_UI, 36, "bold"), text_color=C["text_main"]).pack(
             anchor="w", pady=(10, 20))
 
         bar = ctk.CTkFrame(self.main, fg_color=C["bg_surface"], corner_radius=10)
@@ -815,12 +841,12 @@ class XtremeADB(ctk.CTk):
         # Sort bar
         sort_bar = ctk.CTkFrame(self.main, fg_color="transparent")
         sort_bar.pack(fill="x", pady=(0, 5))
-        ctk.CTkLabel(sort_bar, text="Sort:", font=("Segoe UI", 11), text_color=C["text_sub"]).pack(side="left",
+        ctk.CTkLabel(sort_bar, text="Sort:", font=(F_UI, 11), text_color=C["text_sub"]).pack(side="left",
                                                                                                    padx=(5, 8))
         self._app_sort = ctk.StringVar(value=CONF.get("app_sort", "a_z"))
         for label, val in [("A→Z", "a_z"), ("Z→A", "z_a")]:
             ctk.CTkRadioButton(sort_bar, text=label, variable=self._app_sort, value=val,
-                               font=("Segoe UI", 11), text_color=C["text_sub"],
+                               font=(F_UI, 11), text_color=C["text_sub"],
                                command=self._on_app_sort_change).pack(side="left", padx=6)
 
         split = ctk.CTkFrame(self.main, fg_color="transparent")
@@ -830,8 +856,8 @@ class XtremeADB(ctk.CTk):
 
         act = ctk.CTkFrame(split, width=250, fg_color=C["bg_surface"], corner_radius=15)
         act.pack(side="right", fill="y")
-        ctk.CTkLabel(act, text="Actions", font=("Segoe UI", 14, "bold"), text_color=C["text_main"]).pack(pady=(20, 5))
-        self.lbl_pkg = ctk.CTkLabel(act, text="None selected", text_color="gray", wraplength=200, font=("Segoe UI", 11))
+        ctk.CTkLabel(act, text="Actions", font=(F_UI, 14, "bold"), text_color=C["text_main"]).pack(pady=(20, 5))
+        self.lbl_pkg = ctk.CTkLabel(act, text="None selected", text_color="gray", wraplength=200, font=(F_UI, 11))
         self.lbl_pkg.pack(pady=(0, 15))
 
         ctk.CTkButton(act, text="Uninstall Selected", fg_color=C["danger"], command=self.do_uninst).pack(fill="x",
@@ -857,15 +883,21 @@ class XtremeADB(ctk.CTk):
         if not self.sel_dev: return
         cln = self.sel_dev.split()[0]
         for w in self.app_list.winfo_children(): w.destroy()
+        self._app_buttons = {}
         self.app_console.log("Loading packages...")
-
         def _t():
-            raw = self.bk.run([ADB_PATH, "-s", cln, "shell", "pm", "list", "packages", "-3"])
-            self.all_apps = sorted([x.replace("package:", "").strip() for x in raw.split("\n") if x.strip()])
+            raw = self.bk.run([ADB_PATH, "-s", cln, "shell", "pm", "list", "packages", "-3"], timeout=15)
+            if not raw or not raw.strip():
+                self.app_console.log("[WARNING] No packages found")
+                self.all_apps = []
+            else:
+                self.all_apps = sorted(
+                    [x.replace("package:", "").strip() for x in raw.split("\n") if x.strip()],
+                    key=str.lower
+                )
             self.after(0, lambda: self.filter_apps())
-
         self.run_bg(_t)
-
+        
     def filter_apps(self):
         search = self.app_search.get().lower()
         filtered = [p for p in self.all_apps if search in p.lower()]
@@ -884,19 +916,31 @@ class XtremeADB(ctk.CTk):
         for w in self.app_list.winfo_children():
             w.destroy()
         self._app_buttons = {}
-        for p in pkgs:
-            btn = ctk.CTkButton(
-                self.app_list,
-                text=p,
-                anchor="w",
-                fg_color="transparent",
-                hover_color=C["bg_hover"],
-                text_color=C["text_main"],
-                command=lambda x=p: self.toggle_app_select(x)
-            )
-            btn.pack(fill="x")
-            self._app_buttons[p] = btn
-        self.app_console.log(f"Loaded {total} apps (showing {len(pkgs)}).")
+        CHUNK = 30  # render 30 buttons per frame to keep UI responsive
+
+        def _render_chunk(idx):
+            chunk = pkgs[idx:idx + CHUNK]
+            for p in chunk:
+                btn = ctk.CTkButton(
+                    self.app_list,
+                    text=p,
+                    anchor="w",
+                    fg_color="transparent",
+                    hover_color=C["bg_hover"],
+                    text_color=C["text_main"],
+                    command=lambda x=p: self.toggle_app_select(x)
+                )
+                btn.pack(fill="x")
+                self._app_buttons[p] = btn
+            if idx + CHUNK < len(pkgs):
+                self.after(5, lambda: _render_chunk(idx + CHUNK))
+            else:
+                self.app_console.log(f"Loaded {total} apps (showing {len(pkgs)}).")
+
+        if pkgs:
+            _render_chunk(0)
+        else:
+            self.app_console.log(f"Loaded {total} apps (showing 0).")
 
     def toggle_app_select(self, p):
         if p in self.sel_pkgs:
@@ -988,20 +1032,15 @@ class XtremeADB(ctk.CTk):
             self.adb_cmd_console(["shell", "pm", "clear", pkg])
 
     def do_extract(self):
-        if not self.sel_pkgs:
-            self.app_console.log("[ERROR] No packages selected.")
-            return
-        d = filedialog.askdirectory()
-        if not d:
-            return
         pkgs = self.sel_pkgs.copy()
         cln = self.sel_dev.split()[0]
-
+        d = os.path.join(os.path.dirname(os.path.dirname(__file__)), "extracted")
+        os.makedirs(d, exist_ok=True)
         def _t():
             for pkg in pkgs:
                 path_out = self.bk.run([ADB_PATH, "-s", cln, "shell", "pm", "path", pkg])
                 apk_paths = [line.replace("package:", "").strip() for line in path_out.split("\n") if
-                             "package:" in line]
+                "package:" in line]
                 if not apk_paths:
                     self.app_console.log(f"[ERROR] Could not find APK path for {pkg}")
                     continue
@@ -1015,16 +1054,15 @@ class XtremeADB(ctk.CTk):
                         [ADB_PATH, "-s", cln, "pull", apk_path, local_path],
                         lambda l: self.app_console.log(l)
                     )
-                self.app_console.log(f"✓ {pkg} → {pkg_dir}")
-            self.app_console.log("Extraction complete.")
-
+                    self.app_console.log(f"Extracted {pkg} to {pkg_dir}")
+                self.app_console.log("Extraction complete.")
         self.run_bg(_t)
 
     # --- FILES ---
     def view_files(self):
         self.clear()
         self.highlight("Files")
-        ctk.CTkLabel(self.main, text="File Explorer", font=("Segoe UI", 36, "bold"), text_color=C["text_main"]).pack(anchor="w", pady=(10, 20))
+        ctk.CTkLabel(self.main, text="File Explorer", font=(F_UI, 36, "bold"), text_color=C["text_main"]).pack(anchor="w", pady=(10, 20))
 
         nav = ctk.CTkFrame(self.main, fg_color=C["bg_surface"])
         nav.pack(fill="x", pady=10)
@@ -1043,112 +1081,122 @@ class XtremeADB(ctk.CTk):
         # Sort bar
         fsort_bar = ctk.CTkFrame(self.main, fg_color="transparent")
         fsort_bar.pack(fill="x", pady=(0, 5))
-        ctk.CTkLabel(fsort_bar, text="Sort:", font=("Segoe UI", 11), text_color=C["text_sub"]).pack(side="left",
-                                                                                                        padx=(5, 8))
+        ctk.CTkLabel(fsort_bar, text="Sort:", font=(F_UI, 11), text_color=C["text_sub"]).pack(side="left", padx=(5, 8))
         self._file_sort = ctk.StringVar(value=CONF.get("file_sort", "a_z"))
-        for label, val in [("A→Z", "a_z"), ("Z→A", "z_a"), ("Folders first", "folders_first"),
-                            ("Files first", "files_first")]:
-            ctk.CTkRadioButton(fsort_bar, text=label, variable=self._file_sort, value=val,
-                                font=("Segoe UI", 11), text_color=C["text_sub"],
-                                command=self._on_file_sort_change).pack(side="left", padx=6)
+        for label, val in [("A→Z", "a_z"), ("Z→A", "z_a"), ("Folders first", "folders_first"), ("Files first", "files_first")]:
+            ctk.CTkRadioButton(fsort_bar, text=label, variable=self._file_sort, value=val, font=(F_UI, 11), text_color=C["text_sub"], command=self._on_file_sort_change).pack(side="left", padx=6)
 
         self.fm_list = ctk.CTkScrollableFrame(self.main, fg_color=C["bg_surface"], corner_radius=15)
         self.fm_list.pack(fill="both", expand=True)
         self.fm_sel = None
-        self.fm_selected = []  # Track multiple selections
-        self.ctrl_pressed = False  # Track Ctrl key
+        self.fm_selected = []
+        self.ctrl_pressed = False
         self.fm_ent.insert(0, self.cur_path)
 
         self.fm_console = LogConsole(self.main, height=120)
         self.fm_console.pack(fill="x", pady=(10, 0))
         self.fm_load()
 
+
     def fm_load(self):
         if not self.sel_dev: return
         cln = self.sel_dev.split()[0]
         path = self.fm_ent.get()
         self.cur_path = path
-        for w in self.fm_list.winfo_children(): w.destroy()
+
+        # Increment generation so any in-flight render knows it's stale
+        self._fm_gen = getattr(self, '_fm_gen', 0) + 1
+        my_gen = self._fm_gen
+
+        for w in self.fm_list.winfo_children():
+            w.destroy()
         self.file_buttons = []
+
         self.fm_console.log(f"Listing {path}...")
 
         def _t():
-            out = self.bk.run([ADB_PATH, "-s", cln, "shell", f"ls {path}"])
-            if "[ERROR]" in out or "No such file" in out:
+            out = self.bk.run([ADB_PATH, "-s", cln, "shell", f"ls -p '{path}'"], timeout=10)
+            if "[ERROR]" in out or "No such file" in out or "Permission denied" in out:
                 self.after(0, lambda: self.fm_console.log("Error reading directory."))
                 return
             items = [x.strip() for x in out.split("\n") if x.strip()]
-
             if not items:
                 self.after(0, lambda: self.fm_console.log("Directory is empty."))
                 return
-
-            items_with_type = []
-            folder_count = 0
-            file_count = 0
-
-            for item in items:
-                test_cmd = f"[ -d '{path.rstrip('/')}/{item}' ] && echo DIR || echo FILE"
-                result = self.bk.run([ADB_PATH, "-s", cln, "shell", test_cmd]).strip()
-                is_dir = "DIR" in result
-                display_name = f"{item}/" if is_dir else item
-                items_with_type.append(display_name)
-
-                if is_dir:
-                    folder_count += 1
-                else:
-                    file_count += 1
-
-            self.after(0, lambda: self._populate_file_list(items_with_type))
+            folder_count = sum(1 for i in items if i.endswith("/"))
+            file_count = len(items) - folder_count
+            self.after(0, lambda i=items, g=my_gen: self._populate_file_list(i, g))
             self.after(0, lambda: self.fm_console.log(f"Listed: {file_count} file(s), {folder_count} folder(s)"))
 
         self.run_bg(_t)
 
-    def _populate_file_list(self, items):
-        sort = self._file_sort.get() if hasattr(self, '_file_sort') else CONF.get("file_sort", "a_z")
-        dirs = [i for i in items if i.endswith("/")]
-        files = [i for i in items if not i.endswith("/")]
-        if sort == "a_z":
-            dirs.sort();
-            files.sort()
-            items = dirs + files
-        elif sort == "z_a":
-            dirs.sort(reverse=True);
-            files.sort(reverse=True)
-            items = dirs + files
-        elif sort == "folders_first":
-            dirs.sort();
-            files.sort()
-            items = dirs + files
-        elif sort == "files_first":
-            files.sort();
-            dirs.sort()
-            items = files + dirs
 
-        for item in items:
-            is_dir = item.endswith("/")
-            col = C["primary"] if is_dir else C["text_main"]
-            icon = "📁" if is_dir else "📄"
-            btn = ctk.CTkButton(
-                self.fm_list,
-                text=f"{icon}  {item}",
-                anchor="w",
-                fg_color="transparent",
-                hover_color=C["bg_hover"],
-                text_color=col,
-                command=lambda n=item: self.fm_click_item(n)
-            )
-            btn.pack(fill="x")
-            if is_dir:
-                btn.bind("<Double-Button-1>", lambda e, x=item: self.fm_ent_dir(x))
-            btn.bind("<Button-3>", lambda e, name=item: self.show_file_context_menu(e, name))
-            self.file_buttons.append((btn, item))
+    def _populate_file_list(self, items, gen):
+        # Bail out if a newer fm_load has already started
+        if gen != getattr(self, '_fm_gen', 0):
+            return
+
+        sort = self._file_sort.get() if hasattr(self, '_file_sort') else CONF.get("file_sort", "a_z")
+        dirs = sorted([i for i in items if i.endswith("/")])
+        files = sorted([i for i in items if not i.endswith("/")])
+
+        if sort == "z_a":
+            dirs = list(reversed(dirs))
+            files = list(reversed(files))
+            sorted_items = dirs + files
+        elif sort == "files_first":
+            sorted_items = files + dirs
+        else:  # a_z and folders_first both put dirs first
+            sorted_items = dirs + files
+
+        CHUNK = 40
+
+        def _render_chunk(idx, g):
+            # Bail if stale
+            if g != getattr(self, '_fm_gen', 0):
+                return
+            chunk = sorted_items[idx:idx + CHUNK]
+            for item in chunk:
+                is_dir = item.endswith("/")
+                col = C["primary"] if is_dir else C["text_main"]
+                icon = "📁" if is_dir else "📄"
+                btn = ctk.CTkButton(
+                    self.fm_list,
+                    text=f"{icon}  {item}",
+                    anchor="w",
+                    fg_color="transparent",
+                    hover_color=C["bg_hover"],
+                    text_color=col,
+                    command=lambda n=item: self.fm_click_item(n)
+                )
+                btn.pack(fill="x")
+                if is_dir:
+                    btn.bind("<Double-Button-1>", lambda e, x=item: self.fm_ent_dir(x))
+                btn.bind(RIGHT_CLICK, lambda e, name=item: self.show_file_context_menu(e, name))
+                self.file_buttons.append((btn, item))
+
+            # Force the scrollable frame's canvas to update its scroll region
+            self.fm_list.update_idletasks()
+            if hasattr(self.fm_list, '_parent_canvas'):
+                self.fm_list._parent_canvas.configure(
+                    scrollregion=self.fm_list._parent_canvas.bbox("all")
+                )
+
+            if idx + CHUNK < len(sorted_items):
+                self.after(5, lambda i=idx + CHUNK, g=g: _render_chunk(i, g))
+
+        if sorted_items:
+            _render_chunk(0, gen)
+
 
     def _on_file_sort_change(self):
         save_config("file_sort", self._file_sort.get())
         global CONF
         CONF = load_config()
         self.fm_load()
+
+
+    # ==================== FILE SELECTION & NAVIGATION ====================
 
     def fm_click_item(self, name):
         if self.ctrl_pressed:
@@ -1173,9 +1221,10 @@ class XtremeADB(ctk.CTk):
         if len(self.fm_selected) > 0:
             self.fm_console.log(f"{len(self.fm_selected)} item(s) selected")
 
+
     def show_file_context_menu(self, event, name):
         import tkinter as tk
-
+        
         menu = tk.Menu(self, tearoff=0)
 
         if len(self.fm_selected) > 1:
@@ -1195,11 +1244,13 @@ class XtremeADB(ctk.CTk):
 
         menu.post(event.x_root, event.y_root)
 
+
     def fm_ent_dir(self, x):
         self.cur_path = (self.cur_path.rstrip("/") + "/" + x).replace("\\", "/")
         self.fm_ent.delete(0, "end")
         self.fm_ent.insert(0, self.cur_path)
         self.fm_load()
+
 
     def fm_up(self):
         parts = self.cur_path.rstrip("/").split("/")
@@ -1209,75 +1260,386 @@ class XtremeADB(ctk.CTk):
         self.fm_ent.insert(0, self.cur_path)
         self.fm_load()
 
+
+    # ==================== FOLDER OPERATIONS ====================
+
     def fm_mkdir(self):
         dlg = ctk.CTkInputDialog(text="Folder name:", title="New Folder")
         name = dlg.get_input()
         if name:
-            self.adb_cmd_console(["shell", "mkdir", "-p", f'"{self.cur_path.rstrip("/")}/{name}"'])
+            # Validate folder name (no spaces or special chars)
+            if " " in name or any(c in name for c in '<>:"/\\|?*'):
+                self.fm_console.log("Invalid folder name. Use alphanumeric and underscore only.")
+                return
+            
+            cmd = ["shell", "mkdir", "-p", f'"{self.cur_path.rstrip("/")}/{name}"']
+            out = self.adb_cmd_console(cmd)
+            
+            if "[ERROR]" in out or "No such file" in out:
+                self.fm_console.log(f"Failed to create folder '{name}'")
+                return
+            
             self.after(500, self.fm_load)
 
+
     def fm_del(self):
-        if self.fm_sel and messagebox.askyesno("Confirm", f"Delete {self.fm_sel}?"):
-            self.adb_cmd_console(["shell", "rm", "-rf", f'"{self.cur_path.rstrip("/")}/{self.fm_sel}"'])
+        if not self.fm_sel: 
+            self.fm_console.log("No item selected.")
+            return
+        
+        if messagebox.askyesno("Confirm", f"Delete {self.fm_sel}?"):
+            cmd = ["shell", "rm", "-rf", f'"{self.cur_path.rstrip("/")}/{self.fm_sel}"']
+            out = self.adb_cmd_console(cmd)
+            
+            if "[ERROR]" in out or "No such file" in out:
+                self.fm_console.log(f"Failed to delete '{self.fm_sel}'")
+                return
+            
             self.after(500, self.fm_load)
+
 
     def fm_del_multiple(self):
         if not self.fm_selected:
+            self.fm_console.log("Nothing selected.")
             return
+        
         if messagebox.askyesno("Confirm", f"Delete {len(self.fm_selected)} items?"):
-            if not self.sel_dev: return
+            if not self.sel_dev: 
+                self.fm_console.log("No device connected!")
+                return
+                
             cln = self.sel_dev.split()[0]
-            for name in self.fm_selected:
-                path = f"{self.cur_path.rstrip('/')}/{name.rstrip('/')}"
-                self.fm_console.log(f"Deleting {name}...")
-                self.bk.run([ADB_PATH, "-s", cln, "shell", "rm", "-rf", f'"{path}"'])
-            self.fm_selected = []
-            self.after(500, self.fm_load)
+            
+            def _del():
+                for name in self.fm_selected:
+                    path = f"{self.cur_path.rstrip('/')}/{name.rstrip('/')}"
+                    cmd = [ADB_PATH, "-s", cln, "shell", "rm", "-rf", f'"{path}"']
+                    out = self.bk.run(cmd)
+                    
+                    if "[ERROR]" in out:
+                        self.after(0, lambda n=name: self.fm_console.log(f"✗ Failed to delete {n}"))
+                
+                self.fm_selected = []
+                self.after(500, self.fm_load)
+            
+            self.run_bg(_del)
+
 
     def fm_ren(self):
-        if not self.fm_sel: return
+        if not self.fm_sel: 
+            self.fm_console.log("No item selected.")
+            return
+        
         dlg = ctk.CTkInputDialog(text="New name:", title="Rename")
         new_name = dlg.get_input()
-        if new_name:
-            old = f'"{self.cur_path.rstrip("/")}/{self.fm_sel}"'
-            new = f'"{self.cur_path.rstrip("/")}/{new_name}"'
-            self.adb_cmd_console(["shell", "mv", old, new])
-            self.after(500, self.fm_load)
+        
+        if not new_name or " " in new_name:
+            self.fm_console.log("Invalid folder name. Use alphanumeric and underscore only.")
+            return
+            
+        old = f'"{self.cur_path.rstrip("/")}/{self.fm_sel}"'
+        new = f'"{self.cur_path.rstrip("/")}/{new_name}"'
+        
+        cmd = ["shell", "mv", old, new]
+        out = self.adb_cmd_console(cmd)
+        
+        if "[ERROR]" in out or "No such file" in out:
+            self.fm_console.log(f"Failed to rename '{self.fm_sel}'")
+            return
+        
+        self.after(500, self.fm_load)
+
+
+    # ==================== UPLOAD (PUSH) OPERATIONS ====================
 
     def fm_upload(self):
-        files = filedialog.askopenfilenames()
-        if files:
-            for f in files: self.adb_cmd_console(["push", f, self.cur_path.rstrip("/") + "/"])
-            self.after(1000, self.fm_load)
+        """Upload multiple local files to device with real progress"""
+        if not self.sel_dev:
+            messagebox.showerror("Error", "No device connected!")
+            return
 
-    def fm_download_single(self, name):
-        if not self.sel_dev: return
+        cln = self.sel_dev.split()[0]
+        files = filedialog.askopenfilenames()
+        if not files:
+            return
+
+        dest_path = self.cur_path.rstrip("/") + "/"
+        total_files = len(files)
+        pframe, bar, lbl = self._show_progress(f"Uploading 0/{total_files}...")
+
+        def _upload():
+            done = 0
+            for i, f in enumerate(files):
+                fname = os.path.basename(f)
+                fsize = os.path.getsize(f) if os.path.exists(f) else 0
+                self.after(0, lambda n=fname, s=fsize, idx=i:
+                    self._update_progress(bar, lbl, idx, total_files,
+                        f"Uploading {n} ({idx+1}/{total_files})... {self._fmt(s)}"))
+                self.after(0, lambda n=fname, s=fsize:
+                    self.fm_console.log(f"Uploading {n}... ({self._fmt(s)})"))
+
+                failed = False
+                last_line = ""
+                def _cb(line, n=fname):
+                    nonlocal failed, last_line
+                    last_line = line
+                    if "[ERROR]" in line or "error:" in line.lower():
+                        failed = True
+                    cur, tot = self._parse_adb_line(line)
+                    if cur is not None and tot not in (None, 100):
+                        use_tot = fsize if fsize > 0 else tot
+                        self.after(0, lambda c=cur, ut=use_tot, n=n:
+                            self._update_progress(bar, lbl, c, ut,
+                                f"Uploading {n}... {self._fmt(c)} / {self._fmt(ut)}"))
+
+                self.bk.run_live([ADB_PATH, "-s", cln, "push", f, dest_path], _cb)
+
+                if failed:
+                    self.after(0, lambda n=fname, l=last_line:
+                        self.fm_console.log(f"✗ Failed: {n} — {l}"))
+                else:
+                    done += 1
+                    self.after(0, lambda n=fname: self.fm_console.log(f"✓ Uploaded {n}"))
+
+            msg = f"✓ Done: {done}/{total_files} file(s) uploaded."
+            self.after(0, lambda: self._update_progress(bar, lbl, 1, 1, msg))
+            self.after(0, lambda: self.fm_console.log(msg))
+            self.after(500, self.fm_load)
+            self.after(3000, pframe.destroy)
+
+        self.run_bg(_upload)
+
+
+    def fm_upload_to(self, dest_folder=None):
+        """Upload a local folder to device"""
+        if not self.sel_dev:
+            messagebox.showerror("Error", "No device connected!")
+            return
+
+        cln = self.sel_dev.split()[0]
+        src_folder = filedialog.askdirectory(title="Select Folder to Upload")
+        if not src_folder:
+            return
+
+        if dest_folder:
+            dest_path = f"{self.cur_path.rstrip('/')}/{dest_folder.rstrip('/')}/{os.path.basename(src_folder)}"
+        else:
+            dest_path = f"{self.cur_path.rstrip('/')}/{os.path.basename(src_folder)}"
+
+        total_files = sum(len(fs) for _, _, fs in os.walk(src_folder))
+        pframe, bar, lbl = self._show_progress(f"Uploading folder '{os.path.basename(src_folder)}'...")
+
+        def _upload():
+            self.after(0, lambda: self.fm_console.log(
+                f"Uploading folder '{os.path.basename(src_folder)}' ({total_files} files)..."))
+
+            failed = False
+            def _cb(line):
+                nonlocal failed
+                if "[ERROR]" in line or "error:" in line.lower():
+                    failed = True
+                cur, tot = self._parse_adb_line(line)
+                if cur is not None and tot == 100:
+                    self.after(0, lambda c=cur:
+                        self._update_progress(bar, lbl, c, 100,
+                            f"Uploading... {c}%"))
+
+            self.bk.run_live([ADB_PATH, "-s", cln, "push", src_folder, dest_path], _cb)
+
+            if failed:
+                self.after(0, lambda: self.fm_console.log(
+                    f"✗ Failed to upload folder '{os.path.basename(src_folder)}'"))
+                self.after(0, lambda: self._update_progress(bar, lbl, 0, 1, "✗ Upload failed"))
+            else:
+                msg = f"✓ Uploaded {total_files} file(s) successfully."
+                self.after(0, lambda: self._update_progress(bar, lbl, 1, 1, msg))
+                self.after(0, lambda: self.fm_console.log(msg))
+                self.after(3000, pframe.destroy)
+            self.after(500, self.fm_load)
+
+        self.run_bg(_upload)
+
+
+    # ==================== PROGRESS BAR ====================
+
+    def _show_progress(self, label="Transferring..."):
+        """Create and pack a progress bar + label above the console. Returns (bar, lbl)."""
+        frame = ctk.CTkFrame(self.main, fg_color=C["bg_surface"], corner_radius=10)
+        frame.pack(fill="x", pady=(5, 0), before=self.fm_console)
+        lbl = ctk.CTkLabel(frame, text=label, font=(F_UI, 12), text_color=C["text_main"])
+        lbl.pack(anchor="w", padx=12, pady=(8, 2))
+        bar = ctk.CTkProgressBar(frame, height=14, corner_radius=7,
+                                  fg_color=C["input_bg"], progress_color=C["primary"])
+        bar.set(0)
+        bar.pack(fill="x", padx=12, pady=(0, 8))
+        return frame, bar, lbl
+
+    def _update_progress(self, bar, lbl, current, total, label=""):
+        if total > 0:
+            bar.set(min(current / total, 1.0))
+        if label:
+            lbl.configure(text=label)
+
+    def _parse_adb_line(self, line):
+        """
+        Parse ADB push/pull progress lines.
+        ADB prints lines like:
+          /sdcard/file.rar: 1 file pulled, 0 skipped. 18.3 MB/s (524288000 bytes in 27.338s)
+          [ 23%] /sdcard/file.rar
+        Returns (current_bytes, total_bytes) or (None, None) if not a progress line.
+        """
+        # Final summary line: "(524288000 bytes in 27.338s)"
+        m = re.search(r'\((\d+)\s+bytes\s+in\s+[\d.]+s\)', line)
+        if m:
+            b = int(m.group(1))
+            return b, b  # 100% complete
+
+        # Percentage line: "[ 23%] ..."  — ADB only prints this for multi-file pulls
+        m = re.search(r'\[\s*(\d+)%\]', line)
+        if m:
+            pct = int(m.group(1))
+            return pct, 100  # treat as percentage units
+
+        return None, None
+
+    # ==================== DOWNLOAD (PULL) OPERATIONS ====================
+
+    def _get_android_file_size(self, cln, path):
+        """Get Android device file size using stat command"""
+        try:
+            out = self.bk.run([ADB_PATH, "-s", cln, "shell", f"stat -c %s '{path}'"])
+            return int(out.strip())
+        except Exception:
+            return 0
+
+    def _fmt(self, b):
+        for u in ['B','KB','MB','GB']:
+            if b < 1024: return f"{b:.1f} {u}"
+            b /= 1024
+        return f"{b:.1f} TB"
+
+    def fm_download_single(self, name=None):
+        """Download single file from device with real progress bar"""
+        if not self.sel_dev:
+            messagebox.showerror("Error", "No device connected!")
+            return
+
+        if name is None:
+            name = self.fm_sel
+
+        if not name:
+            self.fm_console.log("No item selected.")
+            return
+
+        if name.endswith("/"):
+            self.fm_console.log("Cannot download a folder. Right-click a file instead.")
+            return
+
         cln = self.sel_dev.split()[0]
         d = filedialog.askdirectory(title="Save to")
-        if d:
-            src = f"{self.cur_path.rstrip('/')}/{name.rstrip('/')}"
-            self.fm_console.log(f"Downloading {name}...")
-            # Use pull with recursive flag for folders
-            self.bk.run_live([ADB_PATH, "-s", cln, "pull", src, d], lambda l: self.fm_console.log(l))
+        if not d:
+            return
+
+        src_path = f"{self.cur_path.rstrip('/')}/{name}"
+
+        # Build progress bar on main thread before starting bg thread
+        pframe, bar, lbl = self._show_progress(f"Downloading {name}...")
+
+        def _download():
+            total = self._get_android_file_size(cln, src_path)
+            self.after(0, lambda: self.fm_console.log(
+                f"Downloading {name}... ({self._fmt(total)})"))
+
+            failed = False
+            last_line = ""
+
+            def _cb(line):
+                nonlocal failed, last_line
+                last_line = line
+                if "[ERROR]" in line or "error:" in line.lower():
+                    failed = True
+                cur, tot = self._parse_adb_line(line)
+                if cur is not None:
+                    if tot == 100:  # percentage mode
+                        self.after(0, lambda c=cur, t=tot, n=name:
+                            self._update_progress(bar, lbl,
+                                c, t, f"Downloading {n}... {c}%"))
+                    else:  # bytes mode
+                        use_total = total if total > 0 else tot
+                        self.after(0, lambda c=cur, ut=use_total, n=name:
+                            self._update_progress(bar, lbl,
+                                c, ut, f"Downloading {n}... {self._fmt(c)} / {self._fmt(ut)}"))
+
+            self.bk.run_live([ADB_PATH, "-s", cln, "pull", src_path, d], _cb)
+
+            if failed:
+                self.after(0, lambda: self.fm_console.log(f"✗ Failed: {name} — {last_line}"))
+                self.after(0, lambda: self._update_progress(bar, lbl, 0, 1, f"✗ Failed: {name}"))
+            else:
+                self.after(0, lambda: self._update_progress(bar, lbl, 1, 1, f"✓ Done: {name} ({self._fmt(total)})"))
+                self.after(0, lambda: self.fm_console.log(f"✓ Done: {name} ({self._fmt(total)})"))
+                self.after(3000, pframe.destroy)  # auto-hide after 3s
+
+        self.run_bg(_download)
+
 
     def fm_download_multiple(self):
+        """Download multiple selected files with progress"""
         if not self.fm_selected:
+            messagebox.showerror("Error", "No items selected!")
             return
-        if not self.sel_dev: return
+
+        if not self.sel_dev:
+            messagebox.showerror("Error", "No device connected!")
+            return
+
         cln = self.sel_dev.split()[0]
         d = filedialog.askdirectory(title="Save to")
-        if d:
-            for name in self.fm_selected:
-                src = f"{self.cur_path.rstrip('/')}/{name.rstrip('/')}"
-                self.fm_console.log(f"Downloading {name}...")
-                self.bk.run_live([ADB_PATH, "-s", cln, "pull", src, d], lambda l: self.fm_console.log(l))
-            self.fm_selected = []
+        if not d:
+            return
+
+        selected = list(self.fm_selected)
+        total_files = len(selected)
+        pframe, bar, lbl = self._show_progress(f"Downloading 0/{total_files}...")
+
+        def _download():
+            done = 0
+            for i, name in enumerate(selected):
+                src_path = f"{self.cur_path.rstrip('/')}/{name.rstrip('/')}"
+                self.after(0, lambda n=name, idx=i:
+                    self._update_progress(bar, lbl, idx, total_files,
+                        f"Downloading {n} ({idx+1}/{total_files})..."))
+                self.after(0, lambda n=name: self.fm_console.log(f"Downloading {n}..."))
+
+                failed = False
+                def _cb(line, n=name):
+                    nonlocal failed
+                    if "[ERROR]" in line or "error:" in line.lower():
+                        failed = True
+
+                self.bk.run_live([ADB_PATH, "-s", cln, "pull", src_path, d], _cb)
+
+                if failed:
+                    self.after(0, lambda n=name: self.fm_console.log(f"✗ Failed: {n}"))
+                else:
+                    done += 1
+
+            failed_count = total_files - done
+            msg = f"✓ Downloaded {done}/{total_files} file(s)."
+            if failed_count:
+                msg += f" ({failed_count} failed)"
+            self.after(0, lambda: self._update_progress(bar, lbl, 1, 1, msg))
+            self.after(0, lambda: self.fm_console.log(msg))
+            self.after(3000, pframe.destroy)
+
+        self.run_bg(_download)
+
 
     # --- SHELL ---
     def view_shell(self):
         self.clear()
         self.highlight("Shell")
-        ctk.CTkLabel(self.main, text="ADB Shell Terminal", font=("Segoe UI", 36, "bold"),
+        ctk.CTkLabel(self.main, text="ADB Shell Terminal", font=(F_UI, 36, "bold"),
                      text_color=C["text_main"]).pack(anchor="w", pady=(10, 20))
 
         terminal_container = ctk.CTkFrame(self.main, fg_color=C["bg_surface"], corner_radius=10)
@@ -1285,14 +1647,14 @@ class XtremeADB(ctk.CTk):
 
         header = ctk.CTkFrame(terminal_container, height=35, fg_color="transparent")
         header.pack(fill="x", padx=10, pady=(10, 5))
-        ctk.CTkLabel(header, text="> ADB Shell", font=("Consolas", 12, "bold"), text_color=C["text_sub"]).pack(side="left")
+        ctk.CTkLabel(header, text="> ADB Shell", font=(F_MONO, 12, "bold"), text_color=C["text_sub"]).pack(side="left")
         ctk.CTkButton(header, text="Clear", width=60, height=25, fg_color=C["input_bg"], text_color=C["text_main"],
-                      font=("Segoe UI", 10), command=self.clear_terminal).pack(side="right", padx=5)
+                      font=(F_UI, 10), command=self.clear_terminal).pack(side="right", padx=5)
 
         # Output box (read-only)
         self.shell_output = ctk.CTkTextbox(
             terminal_container,
-            font=("Consolas", 12),
+            font=(F_MONO, 12),
             fg_color=C["term_bg"],
             text_color=C["term_fg"],
             activate_scrollbars=True
@@ -1304,11 +1666,11 @@ class XtremeADB(ctk.CTk):
         input_frame = ctk.CTkFrame(terminal_container, fg_color="transparent")
         input_frame.pack(fill="x", padx=10, pady=(0, 10))
 
-        ctk.CTkLabel(input_frame, text="$", font=("Consolas", 14, "bold"), text_color=C["success"]).pack(side="left", padx=(5, 5))
+        ctk.CTkLabel(input_frame, text="$", font=(F_MONO, 14, "bold"), text_color=C["success"]).pack(side="left", padx=(5, 5))
 
         self.shell_input = ctk.CTkEntry(
             input_frame,
-            font=("Consolas", 12),
+            font=(F_MONO, 12),
             fg_color=C["input_bg"],
             border_width=0,
             text_color=C["text_main"]
@@ -1363,12 +1725,29 @@ class XtremeADB(ctk.CTk):
         self.shell_output.see("end")
         self.shell_output.configure(state="disabled")
 
+    def _run_shell(self):
+        try:
+            self.shell_proc = subprocess.Popen(
+                [ADB_PATH, "-s", clean, "shell"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=0
+            )
+            self.after(0, lambda: self.append_shell_output("Shell connected. Type commands below.\n"))
+        except Exception as e:
+            self.after(0, lambda: self.append_shell_output(f"Error: {e}\n"))
+
     def execute_shell_command(self, event):
         cmd = self.shell_input.get().strip()
 
         if not cmd:
             return "break" if event else None
 
+        if not self.shell_proc:
+            self._run_shell()
+            
         # Clear input
         self.shell_input.delete(0, "end")
 
@@ -1424,7 +1803,7 @@ class XtremeADB(ctk.CTk):
     def view_logcat(self):
         self.clear()
         self.highlight("Logcat")
-        ctk.CTkLabel(self.main, text="Live Logcat", font=("Segoe UI", 36, "bold"), text_color=C["text_main"]).pack(
+        ctk.CTkLabel(self.main, text="Live Logcat", font=(F_UI, 36, "bold"), text_color=C["text_main"]).pack(
             anchor="w", pady=(10, 20))
 
         bar = ctk.CTkFrame(self.main, fg_color="transparent")
@@ -1439,28 +1818,69 @@ class XtremeADB(ctk.CTk):
 
     def start_logcat(self):
         if not self.sel_dev: return
+
         self.log_proc = True
         self.btn_log_start.configure(state="disabled")
+        self._logcat_queue = queue.Queue()
         clean = self.sel_dev.split()[0]
+
         def _loop():
-            # Using Popen to stream
             _si = {}
             if os.name == "nt":
                 _startupinfo = subprocess.STARTUPINFO()
                 _startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 _si["startupinfo"] = _startupinfo
-            proc = subprocess.Popen([ADB_PATH, "-s", clean, "logcat", "-v", "time"],
-                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                    text=True, encoding="utf-8", errors="replace", **_si)
-            while self.log_proc:
-                line = proc.stdout.readline()
-                if line: self.logcat_console.log(line.strip())
-                else: break
-            proc.terminate()
-        self.run_bg(_loop)
+
+            self.adb_process = subprocess.Popen([ADB_PATH, "-s", clean, "logcat", "-v", "time"],
+                                                stdout=subprocess.PIPE,
+                                                stderr=subprocess.STDOUT,
+                                                text=True,
+                                                bufsize=1,
+                                                encoding="utf-8",
+                                                errors="replace",
+                                                **_si
+                                                )
+
+            for line in self.adb_process.stdout:
+                if not self.log_proc:
+                    break
+                self._logcat_queue.put(line.strip())
+
+            try:
+                self.adb_process.kill()
+            except Exception:
+                pass
+
+        def _drain_queue():
+            batch_size = 1000 if self._logcat_queue.qsize() > 1000 else 100
+
+            try:
+                for _ in range(batch_size):
+                    line = self._logcat_queue.get_nowait()
+                    self.logcat_console.log(line)
+            except queue.Empty:
+                pass
+
+            if self.log_proc:
+                self.after(50, _drain_queue)
+
+        self.thread = threading.Thread(target=_loop, daemon=True)
+        self.thread.start()
+        _drain_queue()
 
     def stop_logcat(self):
         self.log_proc = False
+
+        if hasattr(self, 'adb_process'):
+            try:
+                self.adb_process.kill()
+            except Exception:
+                pass
+
+        if hasattr(self, '_logcat_queue'):
+            with self._logcat_queue.mutex:
+                self._logcat_queue.queue.clear()
+
         self.btn_log_start.configure(state="normal")
 
     def save_logcat(self):
@@ -1477,7 +1897,7 @@ class XtremeADB(ctk.CTk):
     def view_fastboot(self):
         self.clear()
         self.highlight("Fastboot")
-        ctk.CTkLabel(self.main, text="Fastboot Tools", font=("Segoe UI", 36, "bold"), text_color=C["text_main"]).pack(
+        ctk.CTkLabel(self.main, text="Fastboot Tools", font=(F_UI, 36, "bold"), text_color=C["text_main"]).pack(
             anchor="w", pady=(10, 20))
 
         warn = ctk.CTkFrame(self.main, fg_color="#4a1010", corner_radius=10, border_width=1, border_color=C["danger"])
@@ -1490,7 +1910,7 @@ class XtremeADB(ctk.CTk):
         # --- Custom Flash Card ---
         flash_card = ctk.CTkFrame(self.main, fg_color=C["bg_surface"], corner_radius=10)
         flash_card.pack(fill="x", pady=10, ipady=10)
-        ctk.CTkLabel(flash_card, text="Flash Partition", font=("Segoe UI", 16, "bold"), text_color=C["text_main"]).pack(
+        ctk.CTkLabel(flash_card, text="Flash Partition", font=(F_UI, 16, "bold"), text_color=C["text_main"]).pack(
             anchor="w", padx=20, pady=(10, 5))
 
         # Partition selection mode
@@ -1526,7 +1946,7 @@ class XtremeADB(ctk.CTk):
         # A/B slot selection
         ab_row = ctk.CTkFrame(flash_card, fg_color="transparent")
         ab_row.pack(fill="x", padx=20, pady=(8, 5))
-        ctk.CTkLabel(ab_row, text="Slot:", text_color=C["text_sub"], font=("Segoe UI", 12)).pack(side="left",
+        ctk.CTkLabel(ab_row, text="Slot:", text_color=C["text_sub"], font=(F_UI, 12)).pack(side="left",
                                                                                                  padx=(0, 10))
         self._fb_slot = ctk.StringVar(value="none")
         ctk.CTkRadioButton(ab_row, text="No slot (non-A/B)", variable=self._fb_slot, value="none",
@@ -1546,7 +1966,7 @@ class XtremeADB(ctk.CTk):
     def fb_card(self, title, actions):
         f = ctk.CTkFrame(self.main, fg_color=C["bg_surface"], corner_radius=10)
         f.pack(fill="x", pady=10, ipady=10)
-        ctk.CTkLabel(f, text=title, font=("Segoe UI", 16, "bold"), text_color=C["text_main"]).pack(side="left", padx=20)
+        ctk.CTkLabel(f, text=title, font=(F_UI, 16, "bold"), text_color=C["text_main"]).pack(side="left", padx=20)
         for item in actions:
             label, col = item[0], item[1]
             func = item[3] if len(item) > 3 and item[3] else lambda c=item[2]: self.fb_run(c)
@@ -1590,20 +2010,20 @@ class XtremeADB(ctk.CTk):
     def view_wireless(self):
         self.clear()
         self.highlight("Wireless")
-        ctk.CTkLabel(self.main, text="Wireless ADB", font=("Segoe UI", 36, "bold"), text_color=C["text_main"]).pack(anchor="w", pady=(10, 20))
+        ctk.CTkLabel(self.main, text="Wireless ADB", font=(F_UI, 36, "bold"), text_color=C["text_main"]).pack(anchor="w", pady=(10, 20))
 
         # Step 1 - TCP/IP
         c1 = ctk.CTkFrame(self.main, fg_color=C["bg_surface"], corner_radius=15)
         c1.pack(fill="x", pady=10)
-        ctk.CTkLabel(c1, text="1. Enable TCP/IP Mode", font=("Segoe UI", 14, "bold")).pack(side="left", padx=20, pady=20)
+        ctk.CTkLabel(c1, text="1. Enable TCP/IP Mode", font=(F_UI, 14, "bold")).pack(side="left", padx=20, pady=20)
         ctk.CTkButton(c1, text="Enable (5555)", fg_color=C["primary"], command=lambda: self.adb_cmd_console(["tcpip", "5555"])).pack(side="right", padx=20)
 
         # Step 2 - Pair (Android 11+)
         c_pair = ctk.CTkFrame(self.main, fg_color=C["bg_surface"], corner_radius=15)
         c_pair.pack(fill="x", pady=10)
-        ctk.CTkLabel(c_pair, text="2. Pair Device (Android 11+)", font=("Segoe UI", 14, "bold")).pack(anchor="w", padx=20, pady=(20, 5))
+        ctk.CTkLabel(c_pair, text="2. Pair Device (Android 11+)", font=(F_UI, 14, "bold")).pack(anchor="w", padx=20, pady=(20, 5))
         ctk.CTkLabel(c_pair, text="Go to Developer Options → Wireless debugging → Pair with pairing code",
-                     font=("Segoe UI", 11), text_color=C["text_sub"]).pack(anchor="w", padx=20, pady=(0, 8))
+                     font=(F_UI, 11), text_color=C["text_sub"]).pack(anchor="w", padx=20, pady=(0, 8))
         r_pair = ctk.CTkFrame(c_pair, fg_color="transparent")
         r_pair.pack(fill="x", padx=20, pady=(0, 20))
         self.ent_pair_ip = ctk.CTkEntry(r_pair, placeholder_text="IP:PAIR_PORT", height=40, fg_color=C["input_bg"], border_width=0, text_color=C["text_main"])
@@ -1615,7 +2035,7 @@ class XtremeADB(ctk.CTk):
         # Step 3 - Connect
         c2 = ctk.CTkFrame(self.main, fg_color=C["bg_surface"], corner_radius=15)
         c2.pack(fill="x", pady=10)
-        ctk.CTkLabel(c2, text="3. Connect", font=("Segoe UI", 14, "bold")).pack(anchor="w", padx=20, pady=(20, 5))
+        ctk.CTkLabel(c2, text="3. Connect", font=(F_UI, 14, "bold")).pack(anchor="w", padx=20, pady=(20, 5))
         r = ctk.CTkFrame(c2, fg_color="transparent")
         r.pack(fill="x", padx=20, pady=(0, 20))
         self.ent_ip = ctk.CTkEntry(r, placeholder_text="IP:PORT", height=40, fg_color=C["input_bg"], border_width=0, text_color=C["text_main"])
@@ -1626,7 +2046,7 @@ class XtremeADB(ctk.CTk):
         # Step 4 - Disconnect
         c3 = ctk.CTkFrame(self.main, fg_color=C["bg_surface"], corner_radius=15)
         c3.pack(fill="x", pady=10)
-        ctk.CTkLabel(c3, text="4. Disconnect", font=("Segoe UI", 14, "bold")).pack(anchor="w", padx=20, pady=(20, 10))
+        ctk.CTkLabel(c3, text="4. Disconnect", font=(F_UI, 14, "bold")).pack(anchor="w", padx=20, pady=(20, 10))
         ctk.CTkButton(c3, text="Disconnect All", height=40, fg_color=C["danger"], command=self.do_wireless_disconnect_all).pack(fill="x", padx=20, pady=(0, 10))
         r_disc = ctk.CTkFrame(c3, fg_color="transparent")
         r_disc.pack(fill="x", padx=20, pady=(0, 20))
@@ -1680,7 +2100,7 @@ class XtremeADB(ctk.CTk):
     def view_tweaks(self):
         self.clear()
         self.highlight("Tweaks")
-        ctk.CTkLabel(self.main, text="System Tweaks", font=("Segoe UI", 36, "bold"), text_color=C["text_main"]).pack(anchor="w", pady=(10, 20))
+        ctk.CTkLabel(self.main, text="System Tweaks", font=(F_UI, 36, "bold"), text_color=C["text_main"]).pack(anchor="w", pady=(10, 20))
 
         scroll = ctk.CTkScrollableFrame(self.main, fg_color="transparent")
         scroll.pack(fill="both", expand=True)
@@ -1692,14 +2112,14 @@ class XtremeADB(ctk.CTk):
         for label, ns, key in tweaks:
             r = ctk.CTkFrame(f, fg_color="transparent")
             r.pack(fill="x", pady=8, padx=10)
-            ctk.CTkLabel(r, text=label, text_color=C["text_main"], font=("Segoe UI", 13)).pack(side="left", padx=20)
+            ctk.CTkLabel(r, text=label, text_color=C["text_main"], font=(F_UI, 13)).pack(side="left", padx=20)
             ctk.CTkButton(r, text="ON", width=60, fg_color=C["success"], command=lambda nn=ns, kk=key: self.adb_cmd_console(["shell", "settings", "put", nn, kk, "1"])).pack(side="right", padx=5)
             ctk.CTkButton(r, text="OFF", width=60, fg_color="#333", command=lambda nn=ns, kk=key: self.adb_cmd_console(["shell", "settings", "put", nn, kk, "0"])).pack(side="right", padx=5)
 
         # DPI
         f2 = ctk.CTkFrame(scroll, fg_color=C["bg_surface"], corner_radius=15)
         f2.pack(fill="x", pady=10)
-        ctk.CTkLabel(f2, text="DPI Changer", font=("Segoe UI", 14, "bold")).pack(anchor="w", padx=20, pady=10)
+        ctk.CTkLabel(f2, text="DPI Changer", font=(F_UI, 14, "bold")).pack(anchor="w", padx=20, pady=10)
         r2 = ctk.CTkFrame(f2, fg_color="transparent")
         r2.pack(fill="x", padx=20, pady=(0, 20))
         self.ent_dpi = ctk.CTkEntry(r2, placeholder_text="e.g. 400", width=100)
@@ -1710,7 +2130,7 @@ class XtremeADB(ctk.CTk):
         # Animation
         f3 = ctk.CTkFrame(scroll, fg_color=C["bg_surface"], corner_radius=15)
         f3.pack(fill="x", pady=10)
-        ctk.CTkLabel(f3, text="Animation Scale", font=("Segoe UI", 14, "bold")).pack(anchor="w", padx=20, pady=10)
+        ctk.CTkLabel(f3, text="Animation Scale", font=(F_UI, 14, "bold")).pack(anchor="w", padx=20, pady=10)
         r3 = ctk.CTkFrame(f3, fg_color="transparent")
         r3.pack(fill="x", padx=20, pady=(0, 20))
         for scale in ["0.0", "0.5", "1.0", "1.5"]:
@@ -1727,18 +2147,18 @@ class XtremeADB(ctk.CTk):
     def view_backup(self):
         self.clear()
         self.highlight("Backup")
-        ctk.CTkLabel(self.main, text="Backup & Restore", font=("Segoe UI", 36, "bold"), text_color=C["text_main"]).pack(anchor="w", pady=(10, 20))
+        ctk.CTkLabel(self.main, text="Backup & Restore", font=(F_UI, 36, "bold"), text_color=C["text_main"]).pack(anchor="w", pady=(10, 20))
 
         grid = ctk.CTkFrame(self.main, fg_color="transparent")
         grid.pack(fill="x", padx=30)
         b_card = ctk.CTkFrame(grid, fg_color=C["bg_surface"], corner_radius=15)
         b_card.pack(side="left", fill="both", expand=True, padx=(0, 10))
-        ctk.CTkLabel(b_card, text="Backup Device", font=("Segoe UI", 18, "bold")).pack(pady=20)
+        ctk.CTkLabel(b_card, text="Backup Device", font=(F_UI, 18, "bold")).pack(pady=20)
         ctk.CTkButton(b_card, text="Start Backup", height=50, fg_color=C["primary"], command=self.do_backup).pack(pady=20, padx=20)
 
         r_card = ctk.CTkFrame(grid, fg_color=C["bg_surface"], corner_radius=15)
         r_card.pack(side="left", fill="both", expand=True, padx=(10, 0))
-        ctk.CTkLabel(r_card, text="Restore Device", font=("Segoe UI", 18, "bold")).pack(pady=20)
+        ctk.CTkLabel(r_card, text="Restore Device", font=(F_UI, 18, "bold")).pack(pady=20)
         ctk.CTkButton(r_card, text="Start Restore", height=50, fg_color=C["warning"], command=self.do_restore).pack(pady=20, padx=20)
 
         self.backup_console = LogConsole(self.main, height=200)
@@ -1756,21 +2176,21 @@ class XtremeADB(ctk.CTk):
     def view_devices(self):
         self.clear()
         self.highlight("Devices")
-        ctk.CTkLabel(self.main, text="Device Manager", font=("Segoe UI", 36, "bold"), text_color=C["text_main"]).pack(anchor="w", pady=(10, 20))
+        ctk.CTkLabel(self.main, text="Device Manager", font=(F_UI, 36, "bold"), text_color=C["text_main"]).pack(anchor="w", pady=(10, 20))
 
         info_card = ctk.CTkFrame(self.main, fg_color=C["bg_surface"], corner_radius=15)
         info_card.pack(fill="x", pady=(0, 15))
-        ctk.CTkLabel(info_card, text="Active Device", font=("Segoe UI", 14, "bold"), text_color=C["text_main"]).pack(anchor="w", padx=20, pady=(15, 5))
+        ctk.CTkLabel(info_card, text="Active Device", font=(F_UI, 14, "bold"), text_color=C["text_main"]).pack(anchor="w", padx=20, pady=(15, 5))
         self.dev_active_lbl = ctk.CTkLabel(info_card, text=self.sel_dev or "None",
-                                           font=("Segoe UI", 13), text_color=C["primary"])
+                                           font=(F_UI, 13), text_color=C["primary"])
         self.dev_active_lbl.pack(anchor="w", padx=20, pady=(0, 15))
 
         list_card = ctk.CTkFrame(self.main, fg_color=C["bg_surface"], corner_radius=15)
         list_card.pack(fill="x", pady=(0, 15))
         top = ctk.CTkFrame(list_card, fg_color="transparent")
         top.pack(fill="x", padx=20, pady=(15, 10))
-        ctk.CTkLabel(top, text="Connected Devices", font=("Segoe UI", 14, "bold"), text_color=C["text_main"]).pack(side="left")
-        ctk.CTkButton(top, text="↻", width=32, height=32, font=("Segoe UI", 18),
+        ctk.CTkLabel(top, text="Connected Devices", font=(F_UI, 14, "bold"), text_color=C["text_main"]).pack(side="left")
+        ctk.CTkButton(top, text="↻", width=32, height=32, font=(F_UI, 18),
                       fg_color="transparent", hover_color=C["bg_hover"],
                       text_color=C["text_sub"], command=self._refresh_device_list).pack(side="right", padx=(0, 5))
 
@@ -1788,7 +2208,7 @@ class XtremeADB(ctk.CTk):
         devices = self.bk.get_devices()
         if not devices:
             ctk.CTkLabel(self.dev_list_frame, text="No devices found.",
-                         text_color=C["text_sub"], font=("Segoe UI", 12)).pack(pady=10)
+                         text_color=C["text_sub"], font=(F_UI, 12)).pack(pady=10)
             return
 
         for dev in devices:
@@ -1805,7 +2225,7 @@ class XtremeADB(ctk.CTk):
                 self.dev_list_frame,
                 text=label_text,
                 anchor="w",
-                font=("Segoe UI", 12),
+                font=(F_UI, 12),
                 fg_color=C["bg_hover"] if is_selected else "transparent",
                 hover_color=C["bg_hover"],
                 text_color=C["success"] if is_selected else C["text_main"],
@@ -1817,7 +2237,8 @@ class XtremeADB(ctk.CTk):
         self.sel_dev = dev
         if hasattr(self, 'dev_active_lbl') and self.dev_active_lbl.winfo_exists():
             self.dev_active_lbl.configure(text=dev)
-        self.status_lbl.configure(text=dev.split()[0])
+        name = self.bk.run([ADB_PATH, "-s", dev.split()[0], "shell", "settings", "get", "global", "device_name"]).strip()
+        self.status_lbl.configure(text=name)
         self.status_dot.configure(text_color=C["success"])
         self._refresh_device_list()
         if hasattr(self, 'dev_console'):
@@ -1827,12 +2248,12 @@ class XtremeADB(ctk.CTk):
     def view_settings(self):
         self.clear()
         self.highlight("Settings")
-        ctk.CTkLabel(self.main, text="Settings", font=("Segoe UI", 36, "bold"), text_color=C["text_main"]).pack(
+        ctk.CTkLabel(self.main, text="Settings", font=(F_UI, 36, "bold"), text_color=C["text_main"]).pack(
             anchor="w", pady=(10, 20))
 
         c = ctk.CTkFrame(self.main, fg_color=C["bg_surface"], corner_radius=15)
         c.pack(fill="x", padx=30, pady=10)
-        ctk.CTkLabel(c, text="Appearance", font=("Segoe UI", 16, "bold")).pack(anchor="w", padx=20, pady=(20, 10))
+        ctk.CTkLabel(c, text="Appearance", font=(F_UI, 16, "bold")).pack(anchor="w", padx=20, pady=(20, 10))
         row = ctk.CTkFrame(c, fg_color="transparent")
         row.pack(fill="x", padx=20, pady=(0, 20))
         ctk.CTkButton(row, text="Light Mode", height=50, fg_color="#E0E0E0", text_color="black",
@@ -1846,12 +2267,12 @@ class XtremeADB(ctk.CTk):
 
         c2 = ctk.CTkFrame(self.main, fg_color=C["bg_surface"], corner_radius=15)
         c2.pack(fill="x", padx=30, pady=10)
-        ctk.CTkLabel(c2, text="Advanced", font=("Segoe UI", 16, "bold")).pack(anchor="w", padx=20, pady=(20, 10))
+        ctk.CTkLabel(c2, text="Advanced", font=(F_UI, 16, "bold")).pack(anchor="w", padx=20, pady=(20, 10))
 
         # ADB Path picker
         adb_row = ctk.CTkFrame(c2, fg_color="transparent")
         adb_row.pack(fill="x", padx=20, pady=(0, 10))
-        ctk.CTkLabel(adb_row, text="ADB Executable Path", text_color=C["text_main"], font=("Segoe UI", 13)).pack(
+        ctk.CTkLabel(adb_row, text="ADB Executable Path", text_color=C["text_main"], font=(F_UI, 13)).pack(
             side="left", padx=20)
         self.ent_adb_path = ctk.CTkEntry(adb_row,
                                          placeholder_text="e.g. location_to\\adb leave blank for system PATH",
@@ -1866,7 +2287,7 @@ class XtremeADB(ctk.CTk):
 
         su_row = ctk.CTkFrame(c2, fg_color="transparent")
         su_row.pack(fill="x", padx=20, pady=(0, 10))
-        ctk.CTkLabel(su_row, text="Use Super User (Root)", text_color=C["text_main"], font=("Segoe UI", 13)).pack(
+        ctk.CTkLabel(su_row, text="Use Super User (Root)", text_color=C["text_main"], font=(F_UI, 13)).pack(
             side="left", padx=20)
 
         self.su_switch = ctk.CTkSwitch(
@@ -1886,10 +2307,10 @@ class XtremeADB(ctk.CTk):
         refresh_row = ctk.CTkFrame(c2, fg_color="transparent")
         refresh_row.pack(fill="x", padx=20, pady=(10, 20))
         ctk.CTkLabel(refresh_row, text="Dashboard Refresh Interval", text_color=C["text_main"],
-                     font=("Segoe UI", 13)).pack(side="left", padx=20)
+                     font=(F_UI, 13)).pack(side="left", padx=20)
 
         self.refresh_label = ctk.CTkLabel(refresh_row, text=f"{CONF.get('refresh_interval', 3)}s",
-                                          text_color=C["primary"], font=("Segoe UI", 13, "bold"))
+                                          text_color=C["primary"], font=(F_UI, 13, "bold"))
         self.refresh_label.pack(side="right", padx=(0, 10))
 
         self.refresh_slider = ctk.CTkSlider(
@@ -1909,10 +2330,10 @@ class XtremeADB(ctk.CTk):
         poll_row = ctk.CTkFrame(c2, fg_color="transparent")
         poll_row.pack(fill="x", padx=20, pady=(0, 20))
         ctk.CTkLabel(poll_row, text="Device Poll Interval", text_color=C["text_main"],
-                     font=("Segoe UI", 13)).pack(side="left", padx=20)
+                     font=(F_UI, 13)).pack(side="left", padx=20)
 
         self.poll_label = ctk.CTkLabel(poll_row, text=f"{CONF.get('device_poll_interval', 2)}s",
-                                       text_color=C["primary"], font=("Segoe UI", 13, "bold"))
+                                       text_color=C["primary"], font=(F_UI, 13, "bold"))
         self.poll_label.pack(side="right", padx=(0, 10))
 
         self.poll_slider = ctk.CTkSlider(
