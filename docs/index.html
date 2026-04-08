@@ -277,17 +277,9 @@
   <h2 class="section-title">What's new in <span id="ver-tag">v2.0</span></h2>
   <p class="section-sub">Latest release highlights.</p>
   <div class="cl-list">
-    <div class="cl-item reveal"><div class="cl-dot g"></div>Added Device Manager — switch between connected devices easily</div>
-    <div class="cl-item reveal"><div class="cl-dot g"></div>Added Wireless ADB pairing support (Android 11+)</div>
-    <div class="cl-item reveal"><div class="cl-dot g"></div>Added ADB executable path picker in Settings</div>
-    <div class="cl-item reveal"><div class="cl-dot g"></div>Added Force Uninstall for system apps</div>
-    <div class="cl-item reveal"><div class="cl-dot g"></div>Added sorting to App Manager and File Manager</div>
-    <div class="cl-item reveal"><div class="cl-dot y"></div>Improved Fastboot flashing — partition picker with A/B slot support</div>
-    <div class="cl-item reveal"><div class="cl-dot y"></div>Improved App Manager — multi-select packages with Ctrl+Click</div>
-    <div class="cl-item reveal"><div class="cl-dot y"></div>Improved APK extraction — split APK support</div>
-    <div class="cl-item reveal"><div class="cl-dot y"></div>Improved multiple device handling — banner notification instead of popup</div>
-    <div class="cl-item reveal"><div class="cl-dot y"></div>Improved device detection — auto-refreshes on connect/disconnect</div>
-    <div class="cl-item reveal"><div class="cl-dot b"></div>Fixed unauthorized/offline device detection</div>
+    <div class="cl-item reveal"><div class="cl-dot y"></div>Faster file manager</div>
+    <div class="cl-item reveal"><div class="cl-dot g"></div>Progress bar in file manager to give you more info about transferring</div>
+    <div class="cl-item reveal"><div class="cl-dot b"></div>Fixed some other small issues</div>
   </div>
 </div>
 
@@ -308,106 +300,3 @@
   const t = localStorage.getItem('xadb-theme') || 'dark';
   document.documentElement.setAttribute('data-theme', t);
 })();
-
-function applyTheme(t) {
-  document.documentElement.setAttribute('data-theme', t);
-  const icon = document.getElementById('theme-icon');
-  if (icon) icon.textContent = t === 'dark' ? '☀️' : '🌙';
-}
-function toggleTheme() {
-  const cur = document.documentElement.getAttribute('data-theme');
-  const next = cur === 'dark' ? 'light' : 'dark';
-  localStorage.setItem('xadb-theme', next);
-  applyTheme(next);
-}
-// Sync icon once DOM is ready
-document.addEventListener('DOMContentLoaded', function() {
-  const t = document.documentElement.getAttribute('data-theme') || 'dark';
-  const icon = document.getElementById('theme-icon');
-  if (icon) icon.textContent = t === 'dark' ? '☀️' : '🌙';
-});
-
-// PLATFORMS
-const PLATFORMS =[
-  {
-    cls:'win', label:'Windows', sub:'Windows 10 / 11  •  .exe', ext:'exe',
-    icon:`<img src="https://cdn.simpleicons.org/windows11/0078d4" width="24" height="24" alt="Windows" onerror="this.outerHTML='<svg width=&quot;24&quot; height=&quot;24&quot; viewBox=&quot;0 0 88 88&quot; fill=&quot;#0078d4&quot;><path d=&quot;M0 12.4l35.7-4.9v34.4l-35.7.2zm35.7 33.5l.1 34.5L.1 75.5V45.7zm4.3-39L87.3 0v41.5l-47.3.4zm47.3 39.4l-.1 41.3-47.3-6.7-.1-34.7z&quot;/></svg>'"/>`
-  },
-  {
-    cls:'deb', label:'Debian / Ubuntu', sub:'Debian based  •  .deb', ext:'deb',
-    icon:`<img src="https://cdn.simpleicons.org/debian/d70a53" width="24" height="24" alt="Debian"/>`
-  },
-  {
-    cls:'arch', label:'Arch Linux', sub:'Arch based  •  .zst', ext:'pkg.tar.zst',
-    icon:`<img src="https://cdn.simpleicons.org/archlinux/1793d1" width="24" height="24" alt="Arch Linux"/>`
-  },
-  {
-    cls:'rpm', label:'Fedora / RPM', sub:'RPM based  •  .rpm', ext:'rpm',
-    icon:`<img src="https://cdn.simpleicons.org/redhat/cc0000" width="24" height="24" alt="Red Hat"/>`
-  },
-  {
-    cls:'linux', label:'Linux Binary', sub:'x86_64 Linux  •  .bin', ext:'tar.gz',
-    icon:`<img src="https://cdn.simpleicons.org/linux/f5a800" width="24" height="24" alt="Linux"/>`
-  },
-  {
-    cls:'mac', label:'macOS', sub:'Apple Silicon  •  .dmg', ext:'dmg',
-    icon:`<img src="https://cdn.simpleicons.org/apple/888899" width="24" height="24" alt="macOS"/>`
-  }
-];
-
-// 1. cleanVer function is completely removed
-
-// 2. renderButtons is updated to use "version" directly
-function renderButtons(version, id) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.innerHTML = PLATFORMS.map(p => {
-    const filename = p.ext ? `xadb_${p.cls}_v${version}.${p.ext}` : `xadb_${p.cls}_v${version}`;
-    return `<a class="dl-btn ${p.cls}"
-        href="https://github.com/KPR-MAN/XtremeADB/releases/download/Release_v${version}.0/${filename}"
-        target="_blank">
-      ${p.icon}
-      <div class="dl-info">${p.label}<small>${p.sub}</small></div>
-      <span class="dl-arrow">↓</span>
-    </a>`;
-  }).join('');
-}
-
-function fallback(id) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.style.gridTemplateColumns = '1fr';
-  el.innerHTML = `<a class="btn-ghost" href="https://github.com/KPR-MAN/XtremeADB/releases/latest" target="_blank" style="justify-content:center;border-color:var(--primary);color:var(--primary)">📦 Download from GitHub Releases</a>`;
-}
-
-// 3. loadVersion is updated to stop calling cleanVer()
-async function loadVersion() {
-  try {
-    const r = await fetch('https://raw.githubusercontent.com/KPR-MAN/XtremeADB/main/version.json');
-    if (!r.ok) throw 0;
-    const d = await r.json();
-    const ver = d.version;
-    document.getElementById('ver-badge').textContent = `Latest release: v${ver}`;
-    const vt = document.getElementById('ver-tag');
-    if (vt) vt.textContent = `v${ver}`;
-    renderButtons(ver, 'dl-hero');
-  } catch(e) {
-    document.getElementById('ver-badge').textContent = 'See GitHub for latest';
-    fallback('dl-hero');
-  }
-}
-loadVersion();
-
-// SCROLL REVEAL
-const io = new IntersectionObserver(entries => {
-  entries.forEach((e,i) => {
-    if (e.isIntersecting) {
-      setTimeout(() => e.target.classList.add('visible'), i * 60);
-      io.unobserve(e.target);
-    }
-  });
-}, { threshold: 0.08 });
-document.querySelectorAll('.reveal').forEach(el => io.observe(el));
-</script>
-</body>
-</html>
