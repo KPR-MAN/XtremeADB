@@ -274,12 +274,12 @@
 
 <div class="wrap" id="whats-new">
   <div class="section-tag">// CHANGELOG</div>
-  <h2 class="section-title">What's new in <span id="ver-tag">v2.0</span></h2>
+  <h2 class="section-title">What's new in <span id="ver-tag">v2.1</span></h2>
   <p class="section-sub">Latest release highlights.</p>
   <div class="cl-list">
-    <div class="cl-item reveal"><div class="cl-dot y"></div>Faster file manager</div>
-    <div class="cl-item reveal"><div class="cl-dot g"></div>Progress bar in file manager to give you more info about transferring</div>
-    <div class="cl-item reveal"><div class="cl-dot b"></div>Fixed some other small issues</div>
+    <div class="cl-item reveal"><div class="cl-dot g"></div><strong>Faster File Manager</strong> — Optimized file operations for quicker browsing and transfers</div>
+    <div class="cl-item reveal"><div class="cl-dot g"></div><strong>Progress Bar in File Manager</strong> — Real-time transfer progress with speed and ETA info</div>
+    <div class="cl-item reveal"><div class="cl-dot b"></div>Fixed various minor bugs and UI improvements</div>
   </div>
 </div>
 
@@ -300,3 +300,27 @@
   const t = localStorage.getItem('xadb-theme') || 'dark';
   document.documentElement.setAttribute('data-theme', t);
 })();
+
+function applyTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  const icon = document.getElementById('theme-icon');
+  if (icon) icon.textContent = t === 'dark' ? '☀️' : '🌙';
+}
+function toggleTheme() {
+  const cur = document.documentElement.getAttribute('data-theme');
+  const next = cur === 'dark' ? 'light' : 'dark';
+  localStorage.setItem('xadb-theme', next);
+  applyTheme(next);
+}
+// Sync icon once DOM is ready
+document.addEventListener('DOMContentLoaded', function() {
+  const t = document.documentElement.getAttribute('data-theme') || 'dark';
+  const icon = document.getElementById('theme-icon');
+  if (icon) icon.textContent = t === 'dark' ? '☀️' : '🌙';
+});
+
+// PLATFORMS
+const PLATFORMS =[
+  {
+    cls:'win', label:'Windows', sub:'Windows 10 / 11  •  .exe', ext:'exe',
+    icon:`<img src="https://cdn.simpleicons.org/windows11/0078d4" width="24" h
