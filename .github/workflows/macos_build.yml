@@ -33,8 +33,8 @@ jobs:
           --macos-app-icon=xadb.png \
           --company-name="KPR-MAN" \
           --product-name="Xtreme ADB" \
-          --file-version=${{ steps.version.outputs.VER }}.0.0 \
-          --product-version=${{ steps.version.outputs.VER }}.0.0 \
+          --file-version=2.2.0.0 \
+          --product-version=2.2.0.0 \
           --file-description="Xtreme ADB" \
           --remove-output \
           --python-flag=no_docstrings \
@@ -50,10 +50,8 @@ jobs:
         run: |
           # Rename the artifact to match the Product Name
           mv xadb.app "Xtreme ADB.app"
-
-          # Remove old dmg if exists
-          rm -f "xadb_mac_v${{ steps.version.outputs.VER }}.dmg"
-
+          cp -r menu_icons "Xtreme ADB.app/Contents/MacOS/menu_icons"
+          
           # Create DMG
           create-dmg \
             --volname "Xtreme ADB" \
@@ -64,11 +62,11 @@ jobs:
             --icon "Xtreme ADB.app" 200 190 \
             --hide-extension "Xtreme ADB.app" \
             --app-drop-link 600 185 \
-            "xadb_mac_v${{ steps.version.outputs.VER }}.dmg" \
+            "xadb_mac_v2.2.dmg" \
             "Xtreme ADB.app" 
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: xadb_mac_v${{ steps.version.outputs.VER }}
-          path: xadb_mac_v${{ steps.version.outputs.VER }}.dmg
+          name: xadb_mac_v2.2
+          path: xadb_mac_v2.2.dmg
