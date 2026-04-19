@@ -65,6 +65,9 @@ Xtreme ADB is An App That Helps You To Use Android debuging bridge easier By Usi
 3.  Install the required libraries: `pip install -r requirements.txt`
 4.  Run the tool: `python xadb.py`
 
+> You **must** have adb already in PATH if you are on windows, and don't forget to install android-tools on your linux operating system using `sudo apt install android-tools` (Ubuntu-based for most distros) or `sudo pacman -S android-tools` (Arch-based) or other for other linux distros
+
+
 ---
 
 ## Troubleshooting
